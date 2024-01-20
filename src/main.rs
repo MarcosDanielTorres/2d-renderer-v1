@@ -70,7 +70,7 @@ struct App<'a> {
 impl<'a> App<'a> {
     pub fn new() -> Self {
         let mut container = CubeContainer::default();
-        let cubes = App::create_cubes(&mut container);
+        App::create_cubes(&mut container);
         Self {
             ..Default::default()
         }
