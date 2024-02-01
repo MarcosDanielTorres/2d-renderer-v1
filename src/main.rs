@@ -8,10 +8,15 @@ struct CubeContainer<'a> {
 }
 
 impl<'a> CubeContainer<'a> {
-    pub fn update(&mut self, engine: &mut bm::Engine) {
-        // move in random positions
+    pub fn on_update(&mut self, engine: &mut bm::Engine) {
         for cube in self.cubes.iter_mut() {
-            cube.update(engine, (1.0, 1.0));
+            cube.on_update(engine, (1.0, 1.0));
+        }
+    }
+
+    pub fn on_render(&mut self, engine: &mut bm::Engine){
+        for cube in self.cubes.iter_mut() {
+            cube.on_render(engine);
         }
     }
 
@@ -59,6 +64,19 @@ impl Player {
             _ => (),
         }
     }
+
+    pub fn on_render(&self, engine: &mut bm::Engine) {
+        let color: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
+        let position = glam::Vec3::new(self.x, self.y, 0.0);
+        let scale = glam::Vec3::new(1.0, 1.0, 1.0);
+        let rotation: f32 = 0.0;
+
+        engine.prepare_quad_data(
+            glam::Mat4::from_translation(position),
+            glam::Mat4::from_scale(scale),
+            glam::Mat4::from_rotation_z(rotation),
+            color)
+    }
 }
 
 #[derive(Default)]
@@ -72,12 +90,13 @@ impl<'a> App<'a> {
         let mut container = CubeContainer::default();
         App::create_cubes(&mut container);
         Self {
+            container,
             ..Default::default()
         }
     }
     fn create_cubes(container: &mut CubeContainer) {
-        let cube1 = bm::Cube::new(32.0, 13.0, Some("Cube 1"));
-        let cube2 = bm::Cube::new(32.0, 13.0, Some("Cube 1"));
+        let cube1 = bm::Cube::new(0.5, -1.0, Some("Cube 1"));
+        let cube2 = bm::Cube::new(-0.5, 1.0, Some("Cube 2"));
         container.add_cube(cube1);
         container.add_cube(cube2);
     }
@@ -86,28 +105,12 @@ impl<'a> App<'a> {
 impl<'a> bm::Application for App<'a> {
     fn on_update(&mut self, engine: &mut bm::Engine) {
         self.player.update(engine);
-        self.container.update(engine);
+        self.container.on_update(engine);
     }
 
     fn on_render(&mut self, engine: &mut bm::Engine) {
-        let color: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-        // engine.begin_render(|render_pass| {
-        //     engine.draw_quad(color, render_pass);
-        //     // engine.draw_quad(color, &mut render_pass);
-        // });
-
-        /*
-         engine.begin_render()
-
-         engine.draw_quad(color, &mut render_pass);
-         engine.draw_quad(color, &mut render_pass);
-         engine.draw_quad(color, &mut render_pass);
-
-         engine.end_render()
-
-        */
-
-        // dbg!("render method of app");
+        self.player.on_render(engine);
+        self.container.on_render(engine);
     }
 
     fn on_event(&mut self, engine: &mut bm::Engine, event: bm::MyEvent) {

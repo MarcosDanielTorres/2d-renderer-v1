@@ -48,36 +48,36 @@ pub struct Cube<'a> {
     label: Label<'a>,
     x: f32,
     y: f32,
-    vertex_data: [f32; 4],
-    index_data: [f32; 6],
 }
 
 impl<'a> Cube<'a> {
     pub fn new(x: f32, y: f32, label: Label<'a>) -> Self {
-        let vertex_data = Cube::create_vertex_data();
-        let index_data = Cube::create_index_data();
         Self {
-            label,
-            vertex_data,
-            index_data,
             x,
             y,
+            label,
         }
     }
 
-    pub fn update(&mut self, engine: &mut Engine, new_pos: (f32, f32)) {
-        self.x = new_pos.0;
-        self.y = new_pos.1;
-        println!("new pos of {:?}: ({}, {})", self.label, self.x, self.y);
+    pub fn on_update(&mut self, engine: &mut Engine, new_pos: (f32, f32)) {
+        // self.x = new_pos.0;
+        // self.y = new_pos.1;
+        // println!("new pos of {:?}: ({}, {})", self.label, self.x, self.y);
     }
 
-    fn create_vertex_data() -> [f32; 4] {
-        [0.0; 4]
+    pub fn on_render(&mut self, engine: &mut Engine) {
+        let color: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
+        let position = glam::vec3(self.x, self.y, 0.0);
+        let scale = glam::Vec3::new(0.8, 0.8, 0.8);
+        let rotation: f32 = 0.0;
+
+        engine.prepare_quad_data(
+            glam::Mat4::from_translation(position),
+            glam::Mat4::from_scale(scale),
+            glam::Mat4::from_rotation_z(rotation),
+            color);
     }
 
-    fn create_index_data() -> [f32; 6] {
-        [1.0; 6]
-    }
 }
 
 pub trait Application {
@@ -442,7 +442,7 @@ impl Engine {
         }
     }
 
-    pub fn draw_quad<'pass>(
+    pub fn render_quads<'pass>(
         &'pass self,
         render_pass: &mut RenderPass<'pass>,
         queue: &wgpu::Queue,
@@ -576,7 +576,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                     });
 
             // IMPORTANT:
-            // identity values:
+            // Identity values:
             // pos is 0
             // scale is 1
             // rot is 0
@@ -595,35 +595,32 @@ pub async fn async_runner(mut app: impl Application + 'static) {
             let scale3 = glam::Vec3::new(0.1, 0.2, 0.0);
             let rotation_in_z3: f32 = FRAC_PI_4;
 
-            engine.prepare_quad_data(
-                glam::Mat4::from_translation(pos1),
-                glam::Mat4::from_scale(scale1),
-                glam::Mat4::from_rotation_z(rotation_in_z1),
-                color1,
-            );
-
-            engine.prepare_quad_data(
-                glam::Mat4::from_translation(pos2),
-                glam::Mat4::from_scale(scale2),
-                glam::Mat4::from_rotation_z(rotation_in_z2),
-                color2,
-            );
-
-            engine.prepare_quad_data(
-                glam::Mat4::from_translation(pos3),
-                glam::Mat4::from_scale(scale3),
-                glam::Mat4::from_rotation_z(rotation_in_z3),
-                color3,
-            );
+            // engine.prepare_quad_data(
+            //     glam::Mat4::from_translation(pos1),
+            //     glam::Mat4::from_scale(scale1),
+            //     glam::Mat4::from_rotation_z(rotation_in_z1),
+            //     color1,
+            // );
+            //
+            // engine.prepare_quad_data(
+            //     glam::Mat4::from_translation(pos2),
+            //     glam::Mat4::from_scale(scale2),
+            //     glam::Mat4::from_rotation_z(rotation_in_z2),
+            //     color2,
+            // );
+            //
+            // engine.prepare_quad_data(
+            //     glam::Mat4::from_translation(pos3),
+            //     glam::Mat4::from_scale(scale3),
+            //     glam::Mat4::from_rotation_z(rotation_in_z3),
+            //     color3,
+            // );
 
             engine.update_data(&app_context.device);
 
             {
                 let mut rpass = engine.begin_render(&mut encoder, &view);
-
-                engine.draw_quad(&mut rpass, &app_context.queue, &app_context.device);
-                engine.draw_quad(&mut rpass, &app_context.queue, &app_context.device);
-                engine.draw_quad(&mut rpass, &app_context.queue, &app_context.device);
+                engine.render_quads(&mut rpass, &app_context.queue, &app_context.device);
             }
 
             engine.quad_pipeline.quad_info.clear();
