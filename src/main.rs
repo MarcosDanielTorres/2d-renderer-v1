@@ -1,4 +1,6 @@
 #![allow(unused, dead_code)]
+use std::f32::consts::FRAC_2_PI;
+
 use winit::event::{Event, VirtualKeyCode, WindowEvent};
 
 use bm::async_runner;
@@ -10,11 +12,12 @@ pub struct Enemy<'a> {
     label: Label<'a>,
     x: f32,
     y: f32,
+    color: [f32; 4],
 }
 
 impl<'a> Enemy<'a> {
-    pub fn new(x: f32, y: f32, label: Label<'a>) -> Self {
-        Self { x, y, label }
+    pub fn new(x: f32, y: f32, color: [f32; 4], label: Label<'a>) -> Self {
+        Self { x, y, color, label }
     }
 
     pub fn on_update(&mut self, engine: &mut bm::Engine, new_pos: (f32, f32)) {
@@ -24,16 +27,17 @@ impl<'a> Enemy<'a> {
     }
 
     pub fn on_render(&mut self, engine: &mut bm::Engine) {
+        // enemy
         let color: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
         let position = glam::vec3(self.x, self.y, 0.0);
-        let scale = glam::Vec3::new(0.8, 0.8, 0.8);
+        let scale = glam::Vec3::new(75.0, 75.0, 1.0);
         let rotation: f32 = 0.0;
 
         engine.prepare_quad_data(
             glam::Mat4::from_translation(position),
             glam::Mat4::from_scale(scale),
             glam::Mat4::from_rotation_z(rotation),
-            color,
+            self.color,
         );
     }
 }
@@ -45,14 +49,14 @@ struct EnemyContainer<'a> {
 
 impl<'a> EnemyContainer<'a> {
     pub fn on_update(&mut self, engine: &mut bm::Engine) {
-        for cube in self.enemies.iter_mut() {
-            cube.on_update(engine, (1.0, 1.0));
+        for enemy in self.enemies.iter_mut() {
+            enemy.on_update(engine, (1.0, 1.0));
         }
     }
 
     pub fn on_render(&mut self, engine: &mut bm::Engine) {
-        for cube in self.enemies.iter_mut() {
-            cube.on_render(engine);
+        for enemy in self.enemies.iter_mut() {
+            enemy.on_render(engine);
         }
     }
 
@@ -65,6 +69,7 @@ impl<'a> EnemyContainer<'a> {
 struct Player {
     x: f32,
     y: f32,
+    speed: f32,
 }
 
 impl Player {
@@ -102,9 +107,10 @@ impl Player {
     }
 
     pub fn on_render(&self, engine: &mut bm::Engine) {
+        // player
         let color: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
-        let position = glam::Vec3::new(self.x, self.y, 0.0);
-        let scale = glam::Vec3::new(1.0, 1.0, 1.0);
+        let position = glam::Vec3::new(self.x, self.y, 0.0) * self.speed;
+        let scale = glam::Vec3::new(75.0, 75.0, 1.0);
         let rotation: f32 = 0.0;
 
         engine.prepare_quad_data(
@@ -125,17 +131,22 @@ struct App<'a> {
 impl<'a> App<'a> {
     pub fn new() -> Self {
         let mut container = EnemyContainer::default();
-        App::create_cubes(&mut container);
-        Self {
-            container,
-            ..Default::default()
-        }
+        App::create_enemies(&mut container);
+
+        let player = Player {
+            x: 0.0,
+            y: 0.0,
+            speed: 25.0,
+        };
+        Self { container, player }
     }
-    fn create_cubes(container: &mut EnemyContainer) {
-        let cube1 = Enemy::new(0.5, -1.0, Some("Cube 1"));
-        let cube2 = Enemy::new(-0.5, 1.0, Some("Cube 2"));
-        container.add_enemy(cube1);
-        container.add_enemy(cube2);
+    fn create_enemies(container: &mut EnemyContainer) {
+        let color1: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        let color2: [f32; 4] = [1.0, 0.0, 0.0, 0.3];
+        let enemy1 = Enemy::new(0.5, -1.0, color1, Some("Cube 1"));
+        let enemy2 = Enemy::new(-0.5, 1.0, color2, Some("Cube 2"));
+        container.add_enemy(enemy1);
+        container.add_enemy(enemy2);
     }
 }
 
