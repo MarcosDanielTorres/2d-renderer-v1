@@ -37,42 +37,9 @@ use crate::context::AppContext;
 use crate::pipeline::RenderPipelineBuilder;
 use crate::pipeline::VertexDescriptor;
 
+
 use wgpu::util::{align_to, DeviceExt};
 
-type Label<'a> = Option<&'a str>;
-
-#[derive(Default)]
-pub struct Cube<'a> {
-    label: Label<'a>,
-    x: f32,
-    y: f32,
-}
-
-impl<'a> Cube<'a> {
-    pub fn new(x: f32, y: f32, label: Label<'a>) -> Self {
-        Self { x, y, label }
-    }
-
-    pub fn on_update(&mut self, engine: &mut Engine, new_pos: (f32, f32)) {
-        // self.x = new_pos.0;
-        // self.y = new_pos.1;
-        // println!("new pos of {:?}: ({}, {})", self.label, self.x, self.y);
-    }
-
-    pub fn on_render(&mut self, engine: &mut Engine) {
-        let color: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
-        let position = glam::vec3(self.x, self.y, 0.0);
-        let scale = glam::Vec3::new(0.8, 0.8, 0.8);
-        let rotation: f32 = 0.0;
-
-        engine.prepare_quad_data(
-            glam::Mat4::from_translation(position),
-            glam::Mat4::from_scale(scale),
-            glam::Mat4::from_rotation_z(rotation),
-            color,
-        );
-    }
-}
 
 pub trait Application {
     fn on_update(&mut self, engine: &mut Engine);
@@ -451,8 +418,8 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        dbg!(color_uniform_size); // 16
-        dbg!(color_uniform_alignment); // 256
+        dbg!(color_uniform_size);       // 16
+        dbg!(color_uniform_alignment);  // 256
 
         let transform_uniform_size =
             std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
@@ -462,10 +429,10 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(transform_uniform_size, alignment)
         };
-        dbg!(transform_uniform_size); // 192
-        dbg!(transform_uniform_alignment); // 256
-        dbg!(std::mem::size_of::<glam::Mat4>()); // 64
-        dbg!(std::mem::size_of::<TransformComponent>()); // 256
+        dbg!(transform_uniform_size);       // 192
+        dbg!(transform_uniform_alignment);  // 256
+        dbg!(std::mem::size_of::<glam::Mat4>());  // 64
+        dbg!(std::mem::size_of::<TransformComponent>());  // 256
 
         for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
             render_pass.set_bind_group(
