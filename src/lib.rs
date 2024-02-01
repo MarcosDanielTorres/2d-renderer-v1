@@ -37,11 +37,9 @@ use crate::context::AppContext;
 use crate::pipeline::RenderPipelineBuilder;
 use crate::pipeline::VertexDescriptor;
 
-
 use wgpu::util::{align_to, DeviceExt};
 
 type Label<'a> = Option<&'a str>;
-
 
 #[derive(Default)]
 pub struct Cube<'a> {
@@ -52,11 +50,7 @@ pub struct Cube<'a> {
 
 impl<'a> Cube<'a> {
     pub fn new(x: f32, y: f32, label: Label<'a>) -> Self {
-        Self {
-            x,
-            y,
-            label,
-        }
+        Self { x, y, label }
     }
 
     pub fn on_update(&mut self, engine: &mut Engine, new_pos: (f32, f32)) {
@@ -75,9 +69,9 @@ impl<'a> Cube<'a> {
             glam::Mat4::from_translation(position),
             glam::Mat4::from_scale(scale),
             glam::Mat4::from_rotation_z(rotation),
-            color);
+            color,
+        );
     }
-
 }
 
 pub trait Application {
@@ -457,8 +451,8 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        dbg!(color_uniform_size);       // 16
-        dbg!(color_uniform_alignment);  // 256
+        dbg!(color_uniform_size); // 16
+        dbg!(color_uniform_alignment); // 256
 
         let transform_uniform_size =
             std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
@@ -468,10 +462,10 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(transform_uniform_size, alignment)
         };
-        dbg!(transform_uniform_size);       // 192
-        dbg!(transform_uniform_alignment);  // 256
-        dbg!(std::mem::size_of::<glam::Mat4>());  // 64
-        dbg!(std::mem::size_of::<TransformComponent>());  // 256
+        dbg!(transform_uniform_size); // 192
+        dbg!(transform_uniform_alignment); // 256
+        dbg!(std::mem::size_of::<glam::Mat4>()); // 64
+        dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
             render_pass.set_bind_group(
