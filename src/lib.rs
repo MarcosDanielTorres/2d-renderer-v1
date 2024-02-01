@@ -21,6 +21,7 @@ use wgpu::SurfaceTexture;
 use wgpu::TextureView;
 use winit::event::DeviceEvent;
 use winit::event::ElementState;
+use winit::window::Fullscreen;
 use winit::{
     event::{Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::*,
@@ -37,9 +38,7 @@ use crate::context::AppContext;
 use crate::pipeline::RenderPipelineBuilder;
 use crate::pipeline::VertexDescriptor;
 
-
 use wgpu::util::{align_to, DeviceExt};
-
 
 pub trait Application {
     fn on_update(&mut self, engine: &mut Engine);
@@ -101,18 +100,31 @@ impl QuadPipeline {
             }
         }
 
+        // local to the model
         const VERTICES: &[Vertex] = &[
             Vertex {
-                position: [0.0, 0.5, 0.0],
-                tex_coords: [0.4131759, 0.00759614],
+                position: [0.5, 0.5, 0.0],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [-0.5, 0.5, 0.0],
+                tex_coords: [0.0, 0.0],
             },
             Vertex {
                 position: [-0.5, -0.5, 0.0],
-                tex_coords: [0.0048659444, 0.43041354],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [-0.5, -0.5, 0.0],
+                tex_coords: [0.0, 1.0],
             },
             Vertex {
                 position: [0.5, -0.5, 0.0],
-                tex_coords: [0.28081453, 0.949397],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [0.5, 0.5, 0.0],
+                tex_coords: [1.0, 0.0],
             },
         ];
 
@@ -182,11 +194,6 @@ impl QuadPipeline {
                     ],
                     label: Some("texture_bind_group_layout"),
                 });
-
-        let translation = glam::Mat4::from_translation(glam::Vec3::ZERO);
-        let scale = glam::Mat4::from_scale(glam::Vec3::ONE);
-        let model = scale * translation;
-        // glam::Mat4::from_scale_rotation_translation(scale, rotation, translation)
 
         // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
         let transform_uniform_alignment = {
@@ -293,12 +300,12 @@ impl QuadPipeline {
 
     // What the actual fuck just happened?
     // pub fn draw<'r>(&'r self, color: [f32; 4], render_pass: &'r mut wgpu::RenderPass<'r>) {
-    pub fn draw<'a, 'r: 'a>(&'r self, color: [f32; 4], mut render_pass: wgpu::RenderPass<'a>) {
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..3, 0..1);
-    }
+    // pub fn draw<'a, 'r: 'a>(&'r self, color: [f32; 4], mut render_pass: wgpu::RenderPass<'a>) {
+    //     render_pass.set_pipeline(&self.render_pipeline);
+    //     render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+    //     render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+    //     render_pass.draw(0..3, 0..1);
+    // }
 }
 
 pub struct Engine {
@@ -393,8 +400,27 @@ impl Engine {
                 bytemuck::cast_slice(&quad.color),
             );
 
-            let new_model =
-                quad.transform.scale * quad.transform.position * quad.transform.rotation;
+            // not needed as we don't have a camera YET
+            // let view = glam::Mat4::look_to_lh(glam::vec3(0.0, 0.0, -1.0), glam::vec3(0.0, 0.0, 0.0), glam::Vec3::Y);
+            let view = glam::Mat4::IDENTITY;
+
+            let aspect_ratio = 800.0 / 600.0;
+            let center_w = 800.0 / 2.0;
+            let center_h = 600.0 / 2.0;
+            // this one works but its wierd
+            // let proj = glam::Mat4::orthographic_lh(-1.0, 1.0, -1.0, -1.0 + 2.0 / aspect_ratio, -1.001, 1.1);
+
+            let move_to_center = glam::Mat4::from_translation(glam::vec3(center_w, center_h, 0.0));
+            // this is setting up the viewport basically
+            let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+            // let proj = glam::Mat4::perspective_lh(90.0, aspect_ratio, -1.001, 1.1);
+            // let proj = glam::Mat4::IDENTITY;
+            let model = move_to_center
+                * quad.transform.scale
+                * quad.transform.position
+                * quad.transform.rotation;
+
+            let new_model = proj * view * model;
             self.app_context.queue.write_buffer(
                 &self.quad_pipeline.model_mat4_buffer,
                 transform_uniform_offset as wgpu::BufferAddress,
@@ -418,8 +444,8 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        dbg!(color_uniform_size);       // 16
-        dbg!(color_uniform_alignment);  // 256
+        dbg!(color_uniform_size); // 16
+        dbg!(color_uniform_alignment); // 256
 
         let transform_uniform_size =
             std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
@@ -429,10 +455,10 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(transform_uniform_size, alignment)
         };
-        dbg!(transform_uniform_size);       // 192
-        dbg!(transform_uniform_alignment);  // 256
-        dbg!(std::mem::size_of::<glam::Mat4>());  // 64
-        dbg!(std::mem::size_of::<TransformComponent>());  // 256
+        dbg!(transform_uniform_size); // 192
+        dbg!(transform_uniform_alignment); // 256
+        dbg!(std::mem::size_of::<glam::Mat4>()); // 64
+        dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
             render_pass.set_bind_group(
@@ -444,7 +470,7 @@ impl Engine {
                 ],
             );
             render_pass.set_vertex_buffer(0, self.quad_pipeline.vertex_buffer.slice(..));
-            render_pass.draw(0..3, 0..1);
+            render_pass.draw(0..6, 0..1);
         }
     }
 }
@@ -459,7 +485,9 @@ pub enum MyEvent {
 
 pub async fn async_runner(mut app: impl Application + 'static) {
     let event_loop = EventLoop::new();
+    let application_window_size = winit::dpi::PhysicalSize::new(800.0, 600.0);
     let main_window = WindowBuilder::new()
+        .with_inner_size(application_window_size)
         .with_title("Game")
         .build(&event_loop)
         .unwrap();
@@ -543,7 +571,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
             // rot is 0
             let color1: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
             let pos1 = glam::Vec3::new(1.5, 1.0, 0.0);
-            let scale1 = glam::Vec3::new(0.3, 0.3, 0.0);
+            let scale1 = glam::Vec3::new(0.9, 0.9, 0.9);
             let rotation_in_z1: f32 = FRAC_PI_2;
 
             let color2: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
