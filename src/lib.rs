@@ -444,8 +444,8 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        dbg!(color_uniform_size); // 16
-        dbg!(color_uniform_alignment); // 256
+        // dbg!(color_uniform_size); // 16
+        // dbg!(color_uniform_alignment); // 256
 
         let transform_uniform_size =
             std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
@@ -455,10 +455,10 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(transform_uniform_size, alignment)
         };
-        dbg!(transform_uniform_size); // 192
-        dbg!(transform_uniform_alignment); // 256
-        dbg!(std::mem::size_of::<glam::Mat4>()); // 64
-        dbg!(std::mem::size_of::<TransformComponent>()); // 256
+        // dbg!(transform_uniform_size); // 192
+        // dbg!(transform_uniform_alignment); // 256
+        // dbg!(std::mem::size_of::<glam::Mat4>()); // 64
+        // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
             render_pass.set_bind_group(

@@ -13,14 +13,20 @@ pub struct Enemy<'a> {
     x: f32,
     y: f32,
     color: [f32; 4],
+    health: f32,
 }
 
 impl<'a> Enemy<'a> {
     pub fn new(x: f32, y: f32, color: [f32; 4], label: Label<'a>) -> Self {
-        Self { x, y, color, label }
+        Self { x, y, color, label, health: 100.0 }
     }
 
     pub fn on_update(&mut self, engine: &mut bm::Engine, new_pos: (f32, f32)) {
+        if let Some(val) = self.label {
+            if val  == "Cube 1" {
+                println!("Cube 1: {:?}, {:?}", (self.x, self.y), self.health);
+            }
+        }
         // self.x = new_pos.0;
         // self.y = new_pos.1;
         // println!("new pos of {:?}: ({}, {})", self.label, self.x, self.y);
@@ -39,6 +45,7 @@ impl<'a> Enemy<'a> {
             glam::Mat4::from_rotation_z(rotation),
             self.color,
         );
+
     }
 }
 
@@ -48,15 +55,24 @@ struct EnemyContainer<'a> {
 }
 
 impl<'a> EnemyContainer<'a> {
-    pub fn on_update(&mut self, engine: &mut bm::Engine) {
+    pub fn on_update(&mut self, engine: &mut bm::Engine, player: &Player) {
         for enemy in self.enemies.iter_mut() {
+            if enemy.health < 0.0 { continue }
             enemy.on_update(engine, (1.0, 1.0));
+            
+            // check collisions
+            if enemy.x == player.x && enemy.y == player.y {
+                enemy.health -= 3.0;
+                dbg!(enemy.health);
+            }
         }
     }
 
     pub fn on_render(&mut self, engine: &mut bm::Engine) {
         for enemy in self.enemies.iter_mut() {
-            enemy.on_render(engine);
+            if enemy.health >= 0.0 {
+                enemy.on_render(engine);
+            }
         }
     }
 
@@ -73,34 +89,36 @@ struct Player {
 }
 
 impl Player {
-    pub fn update(&self, engine: &mut bm::Engine) {}
+    pub fn update(&self, engine: &mut bm::Engine) {
+        println!("player: {:?}", (self.x, self.y));
+    }
 
     pub fn on_event(&mut self, event: bm::MyEvent) {
-        dbg!("player pos: ({}, {})", self.x, self.y);
+        // dbg!("player pos: ({}, {})", self.x, self.y);
         match event {
             bm::MyEvent::KeyboardInput {
                 state: winit::event::ElementState::Pressed,
                 virtual_keycode: VirtualKeyCode::W,
             } => {
-                self.y += 0.003;
+                self.y += 0.003 * self.speed;
             }
             bm::MyEvent::KeyboardInput {
                 state: winit::event::ElementState::Pressed,
                 virtual_keycode: VirtualKeyCode::S,
             } => {
-                self.y -= 0.003;
+                self.y -= 0.003 * self.speed;
             }
             bm::MyEvent::KeyboardInput {
                 state: winit::event::ElementState::Pressed,
                 virtual_keycode: VirtualKeyCode::A,
             } => {
-                self.x -= 0.003;
+                self.x -= 0.003 * self.speed;
             }
             bm::MyEvent::KeyboardInput {
                 state: winit::event::ElementState::Pressed,
                 virtual_keycode: VirtualKeyCode::D,
             } => {
-                self.x += 0.003;
+                self.x += 0.003 * self.speed;
             }
             _ => (),
         }
@@ -109,7 +127,7 @@ impl Player {
     pub fn on_render(&self, engine: &mut bm::Engine) {
         // player
         let color: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
-        let position = glam::Vec3::new(self.x, self.y, 0.0) * self.speed;
+        let position = glam::Vec3::new(self.x, self.y, 0.0);
         let scale = glam::Vec3::new(75.0, 75.0, 1.0);
         let rotation: f32 = 0.0;
 
@@ -134,8 +152,8 @@ impl<'a> App<'a> {
         App::create_enemies(&mut container);
 
         let player = Player {
-            x: 0.0,
-            y: 0.0,
+            x: 0.2,
+            y: -1.0,
             speed: 25.0,
         };
         Self { container, player }
@@ -153,7 +171,9 @@ impl<'a> App<'a> {
 impl<'a> bm::Application for App<'a> {
     fn on_update(&mut self, engine: &mut bm::Engine) {
         self.player.update(engine);
-        self.container.on_update(engine);
+        self.container.on_update(engine, &self.player);
+
+        
     }
 
     fn on_render(&mut self, engine: &mut bm::Engine) {
