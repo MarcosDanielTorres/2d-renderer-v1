@@ -52,14 +52,213 @@ struct TransformComponent {
     rotation: glam::Mat4,
 }
 
+struct LineComponent {
+    orig: glam::Mat4,
+    dest: glam::Mat4,
+}
+
+// LINE
+struct LineInfo {
+    // updated for every `draw_quad`
+    transform: LineComponent,
+    color: [f32; 4],
+}
+
+struct LinePipeline {
+    id: u32,
+    line_info: Vec<LineInfo>,
+    render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    color_buffer: wgpu::Buffer,
+    model_mat4_buffer: wgpu::Buffer,
+    line_bind_group: wgpu::BindGroup,
+}
+
+impl LinePipeline {
+    fn new(app_context: Arc<AppContext>) -> Self {
+        // vertex
+        #[repr(C)]
+        #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Vertex {
+            position: [f32; 3],
+        }
+
+        impl<'a> VertexDescriptor<'a> for Vertex {
+            fn desc() -> wgpu::VertexBufferLayout<'a> {
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    }],
+                }
+            }
+        }
+
+        // local to the model these are NDC
+        const VERTICES: &[Vertex] = &[
+            Vertex {
+                position: [-0.5, 0.0, 0.0],
+            },
+            Vertex {
+                position: [0.5, 0.0, 0.0],
+            },
+        ];
+
+        let vertex_buffer =
+            app_context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(VERTICES),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+        let texture_bind_group_layout =
+            app_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
+                            },
+                            count: None,
+                        },
+                    ],
+                    label: Some("texture_bind_group_layout"),
+                });
+
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let transform_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(transform_uniform_size, alignment)
+        };
+
+        let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("line MVP Buffer"),
+            size: 40 * transform_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let color_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(color_uniform_size, alignment)
+        };
+        let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Line Color Buffer"),
+            size: 40 * color_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let line_bind_group = app_context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("line_bind_group"),
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &color_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(color_uniform_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &model_mat4_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(transform_uniform_size),
+                        }),
+                    },
+                ],
+            });
+
+        let module = wgpu::ShaderModuleDescriptor {
+            label: Some("Builtin Line Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/builtin_line.wgsl").into()),
+        };
+
+        let render_pipeline = RenderPipelineBuilder::new()
+            .with_topology(wgpu::PrimitiveTopology::LineList)
+            .add_vertex_buffer_layout::<Vertex>()
+            .add_color_target_state(wgpu::ColorTargetState {
+                format: app_context.config.format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent::REPLACE,
+                    alpha: wgpu::BlendComponent::REPLACE,
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })
+            .shader(module)
+            .pipeline_layout_descriptor(
+                "Line Vertex Layout Descriptor",
+                &[&texture_bind_group_layout],
+                &[],
+            )
+            .build(
+                &app_context.device,
+                "Line Vertex Pipeline",
+                "vs_main",
+                "fs_main",
+            );
+
+        Self {
+            id: 323,
+            line_info: vec![],
+            render_pipeline,
+            vertex_buffer,
+            color_buffer,
+            model_mat4_buffer,
+            line_bind_group,
+        }
+    }
+}
+
+// LINE
+
+// QUAD
 struct QuadInfo {
+    // updated for every `draw_quad`
     transform: TransformComponent,
     color: [f32; 4],
 }
 
 struct QuadPipeline {
     id: u32,
-    // updated for every `draw_quad`
     quad_info: Vec<QuadInfo>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
@@ -335,22 +534,26 @@ impl QuadPipeline {
     //     render_pass.draw(0..3, 0..1);
     // }
 }
+// QUAD
 
 pub struct Engine {
     app_context: Arc<AppContext>,
     quad_pipeline: QuadPipeline,
+    line_pipeline: LinePipeline,
     command_encoder: Arc<Mutex<wgpu::CommandEncoder>>,
 }
 
 impl Engine {
     pub fn new(app_context: Arc<AppContext>) -> Self {
         let quad_pipeline = QuadPipeline::new(app_context.clone());
+        let line_pipeline = LinePipeline::new(app_context.clone());
 
         let command_encoder = Arc::new(Mutex::new(app_context.create_command_encoder()));
 
         Self {
             app_context: app_context.clone(),
             quad_pipeline,
+            line_pipeline,
             command_encoder,
         }
     }
@@ -403,7 +606,7 @@ impl Engine {
         });
     }
 
-    pub fn update_data(&mut self, device: &wgpu::Device) {
+    pub fn update_quad_data(&mut self, device: &wgpu::Device) {
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
         // take it from a struct as its always the same for quads
         let color_uniform_alignment = {
@@ -431,16 +634,8 @@ impl Engine {
             // let view = glam::Mat4::look_to_lh(glam::vec3(0.0, 0.0, -1.0), glam::vec3(0.0, 0.0, 0.0), glam::Vec3::Y);
             let view = glam::Mat4::IDENTITY;
 
-            let aspect_ratio = 800.0 / 600.0;
-            let center_w = 800.0 / 2.0;
-            let center_h = 600.0 / 2.0;
-            // this one works but its wierd
-            // let proj = glam::Mat4::orthographic_lh(-1.0, 1.0, -1.0, -1.0 + 2.0 / aspect_ratio, -1.001, 1.1);
-
-            // let move_to_center = glam::Mat4::from_translation(glam::vec3(center_w, center_h, 0.0));
             // this is setting up the viewport basically
             let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
-            // let proj = glam::Mat4::IDENTITY;
             let model = quad.transform.position * quad.transform.rotation * quad.transform.scale;
 
             let new_model = proj * model;
@@ -493,6 +688,102 @@ impl Engine {
             );
             render_pass.set_vertex_buffer(0, self.quad_pipeline.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
+        }
+    }
+    pub fn render_lines<'pass>(
+        &'pass self,
+        render_pass: &mut RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+    ) {
+        render_pass.set_pipeline(&self.line_pipeline.render_pipeline);
+
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let color_uniform_alignment = {
+            let alignment =
+                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+            align_to(color_uniform_size, alignment)
+        };
+        // dbg!(color_uniform_size); // 16
+        // dbg!(color_uniform_alignment); // 256
+
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let transform_uniform_alignment = {
+            let alignment =
+                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+            align_to(transform_uniform_size, alignment)
+        };
+        // dbg!(transform_uniform_size); // 192
+        // dbg!(transform_uniform_alignment); // 256
+        // dbg!(std::mem::size_of::<glam::Mat4>()); // 64
+        // dbg!(std::mem::size_of::<TransformComponent>()); // 256
+
+        for (i, _line) in self.line_pipeline.line_info.iter().enumerate() {
+            render_pass.set_bind_group(
+                0,
+                &self.line_pipeline.line_bind_group,
+                &[
+                    ((i + 1) * color_uniform_alignment as usize) as u32,
+                    ((i + 1) * transform_uniform_alignment as usize) as u32,
+                ],
+            );
+            render_pass.set_vertex_buffer(0, self.line_pipeline.vertex_buffer.slice(..));
+            render_pass.draw(0..2, 0..1);
+        }
+    }
+
+    pub fn prepare_line_data(&mut self, position: glam::Vec3, scale: glam::Vec3, color: [f32; 4]) {
+        self.line_pipeline.line_info.push(LineInfo {
+            color,
+            transform: LineComponent {
+                orig: glam::Mat4::from_translation(position),
+                dest: glam::Mat4::from_translation(position),
+            },
+        });
+
+
+    }
+
+    pub fn update_line_data(&mut self, device: &wgpu::Device) {
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        // take it from a struct as its always the same for quads
+        let color_uniform_alignment = {
+            let alignment =
+                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+            align_to(color_uniform_size, alignment)
+        };
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+        let transform_uniform_alignment = {
+            let alignment =
+                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+            align_to(transform_uniform_size, alignment)
+        };
+
+        for (i, line) in self.line_pipeline.line_info.iter_mut().enumerate() {
+            let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
+            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
+            self.app_context.queue.write_buffer(
+                &self.line_pipeline.color_buffer,
+                color_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&line.color),
+            );
+
+            // not needed as we don't have a camera YET
+            // let view = glam::Mat4::look_to_lh(glam::vec3(0.0, 0.0, -1.0), glam::vec3(0.0, 0.0, 0.0), glam::Vec3::Y);
+            let view = glam::Mat4::IDENTITY;
+
+            // this is setting up the viewport basically
+            let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+            let model = line.transform.position * line.transform.rotation * line.transform.scale;
+
+            let new_model = proj * model;
+            self.app_context.queue.write_buffer(
+                &self.line_pipeline.model_mat4_buffer,
+                transform_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&new_model.to_cols_array_2d()),
+            );
         }
     }
 }
@@ -592,50 +883,18 @@ pub async fn async_runner(mut app: impl Application + 'static) {
             // pos is 0
             // scale is 1
             // rot is 0
-            let color1: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
-            let pos1 = glam::Vec3::new(1.5, 1.0, 0.0);
-            let scale1 = glam::Vec3::new(0.9, 0.9, 0.9);
-            let rotation_in_z1: f32 = FRAC_PI_2;
 
-            let color2: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-            let pos2 = glam::Vec3::new(0.0, 0.0, 0.0);
-            let scale2 = glam::Vec3::new(0.8, 0.8, 0.0);
-            let rotation_in_z2: f32 = 0.0;
-
-            let color3: [f32; 4] = [1.0, 1.0, 0.0, 1.0];
-            let pos3 = glam::Vec3::new(-2.4, 0.0, 0.0);
-            let scale3 = glam::Vec3::new(0.1, 0.2, 0.0);
-            let rotation_in_z3: f32 = FRAC_PI_4;
-
-            // engine.prepare_quad_data(
-            //     glam::Mat4::from_translation(pos1),
-            //     glam::Mat4::from_scale(scale1),
-            //     glam::Mat4::from_rotation_z(rotation_in_z1),
-            //     color1,
-            // );
-            //
-            // engine.prepare_quad_data(
-            //     glam::Mat4::from_translation(pos2),
-            //     glam::Mat4::from_scale(scale2),
-            //     glam::Mat4::from_rotation_z(rotation_in_z2),
-            //     color2,
-            // );
-            //
-            // engine.prepare_quad_data(
-            //     glam::Mat4::from_translation(pos3),
-            //     glam::Mat4::from_scale(scale3),
-            //     glam::Mat4::from_rotation_z(rotation_in_z3),
-            //     color3,
-            // );
-
-            engine.update_data(&app_context.device);
-
+            // RENDERING
+            engine.update_quad_data(&app_context.device);
+            engine.update_line_data(&app_context.device);
             {
                 let mut rpass = engine.begin_render(&mut encoder, &view);
                 engine.render_quads(&mut rpass, &app_context.queue, &app_context.device);
+                engine.render_lines(&mut rpass, &app_context.queue, &app_context.device);
             }
 
             engine.quad_pipeline.quad_info.clear();
+            engine.line_pipeline.line_info.clear();
 
             app_context.queue.submit(Some(encoder.finish()));
             frame.present();

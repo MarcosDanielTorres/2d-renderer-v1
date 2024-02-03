@@ -7,6 +7,7 @@ pub struct RenderPipelineBuilder<'a> {
     pipeline_layout_descriptor: Option<wgpu::PipelineLayoutDescriptor<'a>>,
     render_pipeline_descriptor: Option<wgpu::RenderPipelineDescriptor<'a>>,
     wireframe: bool,
+    topology: wgpu::PrimitiveTopology,
     vertex_buffer_layouts: Vec<wgpu::VertexBufferLayout<'a>>,
     color_target_states: Vec<Option<wgpu::ColorTargetState>>,
 }
@@ -18,6 +19,7 @@ impl<'a> RenderPipelineBuilder<'a> {
             pipeline_layout_descriptor: None,
             render_pipeline_descriptor: None,
             wireframe: false,
+            topology: wgpu::PrimitiveTopology::TriangleList,
             vertex_buffer_layouts: vec![],
             color_target_states: vec![],
         }
@@ -57,6 +59,12 @@ impl<'a> RenderPipelineBuilder<'a> {
     #[allow(unused)]
     pub fn with_wireframe(mut self) -> Self {
         self.wireframe = true;
+        self
+    }
+
+    #[allow(unused)]
+    pub fn with_topology(mut self, topology: wgpu::PrimitiveTopology) -> Self {
+        self.topology = topology;
         self
     }
 
@@ -109,7 +117,8 @@ impl<'a> RenderPipelineBuilder<'a> {
             vertex: vertex_state,
             fragment: Some(fragment_state),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
+                // topology: wgpu::PrimitiveTopology::TriangleList,
+                topology: self.topology,
                 strip_index_format: None,
                 //clock
                 front_face: wgpu::FrontFace::Ccw,
@@ -140,6 +149,7 @@ impl Clone for RenderPipelineBuilder<'_> {
             pipeline_layout_descriptor: self.pipeline_layout_descriptor.clone(),
             render_pipeline_descriptor: self.render_pipeline_descriptor.clone(),
             wireframe: self.wireframe,
+            topology: self.topology,
             vertex_buffer_layouts: self.vertex_buffer_layouts.clone(),
             color_target_states: self.color_target_states.clone(),
         }

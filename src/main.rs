@@ -124,7 +124,7 @@ struct Player {
 
 impl Player {
     pub fn update(&self, engine: &mut bm::Engine) {
-        // println!("player: {:?}", (self.x, self.y));
+        println!("player: {:?}", (self.x, self.y));
     }
 
     pub fn on_event(&mut self, event: bm::MyEvent) {
@@ -164,15 +164,31 @@ impl Player {
         let position = glam::Vec3::new(self.x, self.y, 0.0);
         // this is in pixels, which is good
         let scale = glam::Vec3::new(self.scale_x, self.scale_y, 1.0);
+        let line_scale = glam::Vec3::new(10.0, 0.0, 1.0);
         // let rotation: f32 = FRAC_PI_4;
         let rotation: f32 = 0.0;
 
         engine.prepare_quad_data(
             glam::Mat4::from_translation(position),
-            glam::Mat4::from_scale(scale),
+            glam::Mat4::from_scale(line_scale),
             glam::Mat4::from_rotation_z(rotation),
-            color,
-        )
+            line_color,
+        );
+
+        /*
+         * draw_line(origin: vec2, dest: vec2, color)
+         *
+         * NDC:
+         *  Vert1:
+         *
+         *  What if everything is just a uniform buffer.
+         *  Like: buffer = [o.x, o.y, d.x, d.y]
+         *
+         * */
+        let orig = glam::Vec3::new(self.x, self.y, 0.0);
+        let dest = glam::Vec3::new(self.x + 100.0, self.y, 0.0);
+        let line_color: [f32; 4] = [1.0, 0.0, 0.0, 0.1];
+        engine.prepare_line_data(orig, dest, line_color)
     }
 }
 
