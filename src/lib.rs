@@ -71,6 +71,7 @@ struct LinePipeline {
     vertex_buffer: wgpu::Buffer,
     color_buffer: wgpu::Buffer,
     model_mat4_buffer: wgpu::Buffer,
+    model_mat4_buffer2: wgpu::Buffer,
     line_bind_group: wgpu::BindGroup,
 }
 
@@ -100,10 +101,10 @@ impl LinePipeline {
         // local to the model these are NDC
         const VERTICES: &[Vertex] = &[
             Vertex {
-                position: [-0.5, 0.0, 0.0],
+                position: [0.0, 0.0, 0.0],
             },
             Vertex {
-                position: [0.5, 0.0, 0.0],
+                position: [0.0, 0.0, 0.0],
             },
         ];
 
@@ -143,8 +144,18 @@ impl LinePipeline {
                             },
                             count: None,
                         },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
+                            },
+                            count: None,
+                        },
                     ],
-                    label: Some("texture_bind_group_layout"),
+                    label: Some("line_bind_group_layout"),
                 });
 
         // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
@@ -158,6 +169,13 @@ impl LinePipeline {
         };
 
         let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("line MVP Buffer"),
+            size: 40 * transform_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let model_mat4_buffer2 = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("line MVP Buffer"),
             size: 40 * transform_uniform_alignment,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -204,6 +222,14 @@ impl LinePipeline {
                             size: wgpu::BufferSize::new(transform_uniform_size),
                         }),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &model_mat4_buffer2,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(transform_uniform_size),
+                        }),
+                    },
                 ],
             });
 
@@ -243,6 +269,7 @@ impl LinePipeline {
             vertex_buffer,
             color_buffer,
             model_mat4_buffer,
+            model_mat4_buffer2,
             line_bind_group,
         }
     }
@@ -727,6 +754,7 @@ impl Engine {
                 &[
                     ((i + 1) * color_uniform_alignment as usize) as u32,
                     ((i + 1) * transform_uniform_alignment as usize) as u32,
+                    ((i + 1) * transform_uniform_alignment as usize) as u32,
                 ],
             );
             render_pass.set_vertex_buffer(0, self.line_pipeline.vertex_buffer.slice(..));
@@ -734,12 +762,12 @@ impl Engine {
         }
     }
 
-    pub fn prepare_line_data(&mut self, position: glam::Vec3, scale: glam::Vec3, color: [f32; 4]) {
+    pub fn prepare_line_data(&mut self, orig: glam::Vec3, dest: glam::Vec3, color: [f32; 4]) {
         self.line_pipeline.line_info.push(LineInfo {
             color,
             transform: LineComponent {
-                orig: glam::Mat4::from_translation(position),
-                dest: glam::Mat4::from_translation(position),
+                orig: glam::Mat4::from_translation(orig),
+                dest: glam::Mat4::from_translation(dest),
             },
         });
 
@@ -748,7 +776,6 @@ impl Engine {
 
     pub fn update_line_data(&mut self, device: &wgpu::Device) {
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        // take it from a struct as its always the same for quads
         let color_uniform_alignment = {
             let alignment =
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
@@ -763,7 +790,6 @@ impl Engine {
 
         for (i, line) in self.line_pipeline.line_info.iter_mut().enumerate() {
             let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
-            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
             self.app_context.queue.write_buffer(
                 &self.line_pipeline.color_buffer,
                 color_uniform_offset as wgpu::BufferAddress,
@@ -776,11 +802,19 @@ impl Engine {
 
             // this is setting up the viewport basically
             let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
-            let model = line.transform.position * line.transform.rotation * line.transform.scale;
 
-            let new_model = proj * model;
+            let new_model = proj * line.transform.orig;
+            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
             self.app_context.queue.write_buffer(
                 &self.line_pipeline.model_mat4_buffer,
+                transform_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&new_model.to_cols_array_2d()),
+            );
+
+            let new_model = proj * line.transform.dest;
+            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
+            self.app_context.queue.write_buffer(
+                &self.line_pipeline.model_mat4_buffer2,
                 transform_uniform_offset as wgpu::BufferAddress,
                 bytemuck::cast_slice(&new_model.to_cols_array_2d()),
             );

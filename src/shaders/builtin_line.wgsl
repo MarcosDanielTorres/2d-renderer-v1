@@ -12,7 +12,7 @@ fn vs_main(
     model: VertexInput,
 ) -> VertexOutput {
     var out: VertexOutput;
-    if (vertex_index == 0) {
+    if (vertex_index == u32(0)) {
         out.clip_position = model_mat4_first_vertex * vec4<f32>(model.position, 1.0);
     } else {
         out.clip_position = model_mat4_second_vertex * vec4<f32>(model.position, 1.0);
