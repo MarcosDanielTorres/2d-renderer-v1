@@ -102,6 +102,34 @@ impl QuadPipeline {
 
         // local to the model
         const VERTICES: &[Vertex] = &[
+            // Position of quad at the top-right corner
+            // Vertex {
+            //     position: [0.0, 0.0, 0.0],
+            //     tex_coords: [1.0, 0.0],
+            // },
+            // Vertex {
+            //     position: [-1.0, 0.0, 0.0],
+            //     tex_coords: [0.0, 0.0],
+            // },
+            // Vertex {
+            //     position: [-1.0, -1.0, 0.0],
+            //     tex_coords: [0.0, 1.0],
+            // },
+            // Vertex {
+            //     position: [-1.0, -1.0, 0.0],
+            //     tex_coords: [0.0, 1.0],
+            // },
+            // Vertex {
+            //     position: [0.0, -1.0, 0.0],
+            //     tex_coords: [1.0, 1.0],
+            // },
+            // Vertex {
+            //     position: [0.0, 0.0, 0.0],
+            //     tex_coords: [1.0, 0.0],
+            // },
+            // Position of quad at the top-right corner
+
+            // Position of quad at the center
             Vertex {
                 position: [0.5, 0.5, 0.0],
                 tex_coords: [1.0, 0.0],
@@ -126,6 +154,7 @@ impl QuadPipeline {
                 position: [0.5, 0.5, 0.0],
                 tex_coords: [1.0, 0.0],
             },
+            // Position of quad at the center
         ];
 
         let vertex_buffer =
@@ -148,8 +177,7 @@ impl QuadPipeline {
         .unwrap();
 
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        let transform_uniform_size =
-            std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
         let texture_bind_group_layout =
             app_context
                 .device
@@ -383,8 +411,7 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        let transform_uniform_size =
-            std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
         let transform_uniform_alignment = {
             let alignment =
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
@@ -410,17 +437,13 @@ impl Engine {
             // this one works but its wierd
             // let proj = glam::Mat4::orthographic_lh(-1.0, 1.0, -1.0, -1.0 + 2.0 / aspect_ratio, -1.001, 1.1);
 
-            let move_to_center = glam::Mat4::from_translation(glam::vec3(center_w, center_h, 0.0));
+            // let move_to_center = glam::Mat4::from_translation(glam::vec3(center_w, center_h, 0.0));
             // this is setting up the viewport basically
             let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
-            // let proj = glam::Mat4::perspective_lh(90.0, aspect_ratio, -1.001, 1.1);
             // let proj = glam::Mat4::IDENTITY;
-            let model = move_to_center
-                * quad.transform.scale
-                * quad.transform.position
-                * quad.transform.rotation;
+            let model = quad.transform.position * quad.transform.rotation * quad.transform.scale;
 
-            let new_model = proj * view * model;
+            let new_model = proj * model;
             self.app_context.queue.write_buffer(
                 &self.quad_pipeline.model_mat4_buffer,
                 transform_uniform_offset as wgpu::BufferAddress,
@@ -447,8 +470,7 @@ impl Engine {
         // dbg!(color_uniform_size); // 16
         // dbg!(color_uniform_alignment); // 256
 
-        let transform_uniform_size =
-            std::mem::size_of::<TransformComponent>() as wgpu::BufferAddress;
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
         // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
         let transform_uniform_alignment = {
             let alignment =
@@ -486,8 +508,9 @@ pub enum MyEvent {
 pub async fn async_runner(mut app: impl Application + 'static) {
     let event_loop = EventLoop::new();
     let application_window_size = winit::dpi::PhysicalSize::new(800.0, 600.0);
+    let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
     let main_window = WindowBuilder::new()
-        .with_inner_size(application_window_size)
+        .with_inner_size(application_window_size2)
         .with_title("Game")
         .build(&event_loop)
         .unwrap();
