@@ -770,8 +770,6 @@ impl Engine {
                 dest: glam::Mat4::from_translation(dest),
             },
         });
-
-
     }
 
     pub fn update_line_data(&mut self, device: &wgpu::Device) {

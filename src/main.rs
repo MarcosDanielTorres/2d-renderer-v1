@@ -1,5 +1,5 @@
 #![allow(unused, dead_code)]
-use std::f32::consts::FRAC_PI_4;
+use std::f32::consts::{FRAC_PI_4, FRAC_PI_2, FRAC_PI_6, FRAC_PI_8, FRAC_2_PI};
 
 use nalgebra;
 use winit::event::{Event, VirtualKeyCode, WindowEvent};
@@ -166,7 +166,8 @@ impl Player {
         // this is in pixels, which is good
         let scale = glam::Vec3::new(self.scale_x, self.scale_y, 1.0);
         let line_scale = glam::Vec3::new(10.0, 0.0, 1.0);
-        let rotation: f32 = FRAC_PI_4;
+        let rotation: f32 = FRAC_2_PI;
+        // let rotation: f32 = FRAC_PI_2;
         // let rotation: f32 = 0.0;
 
         engine.prepare_quad_data(
@@ -176,22 +177,43 @@ impl Player {
             color,
         );
 
-        let orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
-        let dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
+        let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
+        let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
         let line_color: [f32; 4] = [1.0, 1.0, 0.0, 0.1];
 
-        let new_orig = (glam::Mat4::from_rotation_z(-rotation)).transform_point3(orig);
-        // let new_orig = (glam::Mat4::from_translation(glam::vec3(100.0, 100.0, 0.0))).transform_point3(orig);
-        let new_dest = (glam::Mat4::from_rotation_z(rotation)).transform_point3(dest);
-        engine.prepare_line_data(new_orig, new_dest, line_color);
-        println!("orig before rot: {:?}, orig after rot: {:?}", orig, new_orig);
+        let range = dest.x - orig.x;
+        // esto da 80. esta bien?
+        println!("woooooooooo {:?}", range);
 
-        let axisangle = nalgebra::Vector3::z() * FRAC_PI_4;
-        let rot = nalgebra::Rotation3::new(axisangle);
-        let new_orig: nalgebra::Vector3<f32> = rot * nalgebra::Vector3::new(orig.x, orig.y, orig.z);
-        println!("orig before rot: {:?}, orig after rot: {:?}", orig, new_orig);
+        let s = rotation.sin();
+        let c = rotation.cos();
 
-        // engine.prepare_line_data(orig, dest, line_color);
+        orig.x -= self.x;
+        orig.y -= self.y;
+
+        let xnew = orig.x * c - orig.y * s;
+        let ynew = orig.x * s + orig.y * c;
+
+        orig.x = xnew + self.x;
+        orig.y = ynew + self.y;
+
+        dest.x -= self.x;
+        dest.y -= self.y;
+
+        let xnew = dest.x * c - dest.y * s;
+        let ynew = dest.x * s + dest.y * c;
+
+        dest.x = xnew + self.x;
+        dest.y = ynew + self.y;
+
+        engine.prepare_line_data(orig, dest, line_color);
+
+        // let line_color2: [f32; 4] = [1.0, 0.0, 0.0, 0.1];
+        // let mut origcopy = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
+        // let mut destcopy = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
+        // let orig2 = (glam::Mat4::from_translation(glam::vec3(-self.x, -self.y, 0.0)) * glam::Mat4::from_rotation_z(rotation) * glam::Mat4::from_translation(glam::vec3(self.x, self.y, 0.0))).transform_point3(origcopy);
+        // let dest2 = (glam::Mat4::from_translation(glam::vec3(-self.x, -self.y, 0.0)) * glam::Mat4::from_rotation_z(rotation) * glam::Mat4::from_translation(glam::vec3(self.x, self.y, 0.0))).transform_point3(destcopy);
+        // engine.prepare_line_data(orig2, dest2, line_color2);
 
         // let orig = glam::Vec3::new(self.x, self.y + self.scale_y / 2.0, 0.0);
         // let dest = glam::Vec3::new(self.x, self.y - 100.0, 0.0);
