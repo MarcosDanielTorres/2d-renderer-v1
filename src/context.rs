@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::texture::{self, Texture};
+use crate::texture::Texture;
 
 pub struct AppContext {
     pub surface: wgpu::Surface<'static>,

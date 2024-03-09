@@ -1,7 +1,11 @@
 #![allow(unused, dead_code)]
 use std::f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8};
 
-use winit::{event::{Event, WindowEvent, ElementState}, keyboard::{PhysicalKey, KeyCode}};
+use glam::*;
+use winit::{
+    event::{ElementState, Event, WindowEvent},
+    keyboard::{KeyCode, PhysicalKey},
+};
 
 use bm::async_runner;
 
@@ -45,16 +49,11 @@ impl<'a> Enemy<'a> {
     pub fn on_render(&mut self, engine: &mut bm::Engine) {
         // enemy
         let color: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
-        let position = glam::vec3(self.x, self.y, 0.0);
-        let scale = glam::Vec3::new(self.scale_x, self.scale_y, 1.0);
-        let rotation: f32 = 0.0;
+        let position = vec3(self.x, self.y, 0.0);
+        let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
+        let angle: f32 = 0.0;
 
-        engine.prepare_quad_data(
-            glam::Mat4::from_translation(position),
-            glam::Mat4::from_scale(scale),
-            glam::Mat4::from_rotation_z(rotation),
-            self.color,
-        );
+        engine.render_quad(position, scale, angle, self.color);
     }
 }
 
@@ -137,36 +136,30 @@ impl Player {
     }
 
     pub fn on_event(&mut self, event: bm::MyEvent) {
-
         let amount = match event {
             bm::MyEvent::KeyboardInput {
                 state: ElementState::Pressed,
                 ..
-            } => {
-                1.0
-            },
+            } => 1.0,
             bm::MyEvent::KeyboardInput {
                 state: ElementState::Released,
                 ..
-            } => {
-                0.0
-            },
+            } => 0.0,
         };
-
 
         match event {
             bm::MyEvent::KeyboardInput {
-                    physical_key: PhysicalKey::Code(KeyCode::KeyW),
-                    ..
+                physical_key: PhysicalKey::Code(KeyCode::KeyW),
+                ..
             } => {
                 // self.y += 0.003 * self.speed;
-                 self.amount_up = amount;
-            },
+                self.amount_up = amount;
+            }
 
             bm::MyEvent::KeyboardInput {
                 physical_key: PhysicalKey::Code(KeyCode::KeyS),
                 ..
-            } =>{
+            } => {
                 // self.y -= 0.003 * self.speed;
                 self.amount_down = -amount;
             }
@@ -174,7 +167,7 @@ impl Player {
             bm::MyEvent::KeyboardInput {
                 physical_key: PhysicalKey::Code(KeyCode::KeyA),
                 ..
-            } =>{
+            } => {
                 // self.x -= 0.003 * self.speed;
                 self.amount_left = -amount;
             }
@@ -182,63 +175,61 @@ impl Player {
             bm::MyEvent::KeyboardInput {
                 physical_key: PhysicalKey::Code(KeyCode::KeyD),
                 ..
-            }=>{
+            } => {
                 // self.x += 0.003 * self.speed;
                 self.amount_right = amount;
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
-    
 
     pub fn on_render(&self, engine: &mut bm::Engine) {
         // player
         let color: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
-        let position = glam::Vec3::new(self.x, self.y, 0.0);
+        let position = Vec3::new(self.x, self.y, 0.0);
         // this is in pixels, which is good
-        let scale = glam::Vec3::new(self.scale_x, self.scale_y, 1.0);
-        let line_scale = glam::Vec3::new(10.0, 0.0, 1.0);
-        let rotation: f32 = FRAC_2_PI;
-        // let rotation: f32 = FRAC_PI_2;
-        // let rotation: f32 = 0.0;
+        let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
+        let line_scale = Vec3::new(10.0, 0.0, 1.0);
+        let angle: f32 = FRAC_2_PI;
+        // let angle: f32 = FRAC_PI_2;
+        // let angle: f32 = 0.0;
 
-        engine.prepare_quad_data(
-            glam::Mat4::from_translation(position),
-            glam::Mat4::from_scale(scale),
-            glam::Mat4::from_rotation_z(rotation),
-            color,
-        );
+        engine.render_quad(position, scale, angle, color);
 
-        let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
-        let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
+        // let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
+        // let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
+        let mut orig = Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0);
+        let mut dest = Vec3::new(200.0, 150.0, 0.0);
         let line_color: [f32; 4] = [1.0, 1.0, 0.0, 0.1];
 
-        let range = dest.x - orig.x;
-        // esto da 80. esta bien?
-        println!("woooooooooo {:?}", range);
+        /////////////////////////////////
+        // for rotations. It's useful////
+        /////////////////////////////////
+        // let s = rotation.sin();
+        // let c = rotation.cos();
+        //
+        // orig.x -= self.x;
+        // orig.y -= self.y;
+        //
+        // let xnew = orig.x * c - orig.y * s;
+        // let ynew = orig.x * s + orig.y * c;
+        //
+        // orig.x = xnew + self.x;
+        // orig.y = ynew + self.y;
+        //
+        // dest.x -= self.x;
+        // dest.y -= self.y;
+        //
+        // let xnew = dest.x * c - dest.y * s;
+        // let ynew = dest.x * s + dest.y * c;
+        //
+        // dest.x = xnew + self.x;
+        // dest.y = ynew + self.y;
+        /////////////////////////////////
+        // for rotations. It's useful////
+        /////////////////////////////////
 
-        let s = rotation.sin();
-        let c = rotation.cos();
-
-        orig.x -= self.x;
-        orig.y -= self.y;
-
-        let xnew = orig.x * c - orig.y * s;
-        let ynew = orig.x * s + orig.y * c;
-
-        orig.x = xnew + self.x;
-        orig.y = ynew + self.y;
-
-        dest.x -= self.x;
-        dest.y -= self.y;
-
-        let xnew = dest.x * c - dest.y * s;
-        let ynew = dest.x * s + dest.y * c;
-
-        dest.x = xnew + self.x;
-        dest.y = ynew + self.y;
-
-        engine.prepare_line_data(orig, dest, line_color);
+        engine.render_line(orig, dest, line_color);
 
         // let line_color2: [f32; 4] = [1.0, 0.0, 0.0, 0.1];
         // let mut origcopy = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
