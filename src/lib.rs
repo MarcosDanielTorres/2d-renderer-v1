@@ -1,31 +1,13 @@
-#![allow(unused, dead_code, deprecated)]
-use std::any::Any;
-use std::any::TypeId;
-use std::collections::HashMap;
+use glam::*;
 
-use std::f32::consts::FRAC_PI_2;
-use std::f32::consts::FRAC_PI_3;
-use std::f32::consts::FRAC_PI_4;
-use std::num::NonZeroU64;
-use std::rc::Rc;
-
-use std::ops::Index;
 use std::sync::Arc;
-use std::sync::Mutex;
-
-use std::cell::RefCell;
-use wgpu::BufferSize;
 use wgpu::RenderPass;
-use wgpu::SurfaceConfiguration;
-use wgpu::SurfaceTexture;
-use wgpu::TextureView;
 
 use winit::event::KeyEvent;
 use winit::keyboard::KeyCode;
 
 use winit::event::DeviceEvent;
 use winit::event::ElementState;
-use winit::window::Fullscreen;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::*,
@@ -52,14 +34,14 @@ pub trait Application {
 }
 
 struct TransformComponent {
-    position: glam::Mat4,
-    scale: glam::Mat4,
-    rotation: glam::Mat4,
+    position: Mat4,
+    scale: Mat4,
+    rotation: Mat4,
 }
 
 struct LineComponent {
-    orig: glam::Mat4,
-    dest: glam::Mat4,
+    orig: Mat4,
+    dest: Mat4,
 }
 
 // LINE
@@ -70,13 +52,12 @@ struct LineInfo {
 }
 
 struct LinePipeline {
-    id: u32,
     line_info: Vec<LineInfo>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     color_buffer: wgpu::Buffer,
-    model_mat4_buffer: wgpu::Buffer,
-    model_mat4_buffer2: wgpu::Buffer,
+    orig_model_mat4_buffer: wgpu::Buffer,
+    dest_model_mat4_buffer: wgpu::Buffer,
     line_bind_group: wgpu::BindGroup,
 }
 
@@ -173,14 +154,14 @@ impl LinePipeline {
             align_to(transform_uniform_size, alignment)
         };
 
-        let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+        let orig_model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("line MVP Buffer"),
             size: 40 * transform_uniform_alignment,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let model_mat4_buffer2 = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+        let dest_model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("line MVP Buffer"),
             size: 40 * transform_uniform_alignment,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -197,6 +178,8 @@ impl LinePipeline {
                 as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
+        // println!("LINE COLOR BUFFER ALIG: {:?}", color_uniform_alignment);
+        // panic!("LINE");
         let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Line Color Buffer"),
@@ -222,7 +205,7 @@ impl LinePipeline {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &model_mat4_buffer,
+                            buffer: &orig_model_mat4_buffer,
                             offset: 0,
                             size: wgpu::BufferSize::new(transform_uniform_size),
                         }),
@@ -230,7 +213,7 @@ impl LinePipeline {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &model_mat4_buffer2,
+                            buffer: &dest_model_mat4_buffer,
                             offset: 0,
                             size: wgpu::BufferSize::new(transform_uniform_size),
                         }),
@@ -268,13 +251,12 @@ impl LinePipeline {
             );
 
         Self {
-            id: 323,
             line_info: vec![],
             render_pipeline,
             vertex_buffer,
             color_buffer,
-            model_mat4_buffer,
-            model_mat4_buffer2,
+            orig_model_mat4_buffer,
+            dest_model_mat4_buffer,
             line_bind_group,
         }
     }
@@ -290,13 +272,12 @@ struct QuadInfo {
 }
 
 struct QuadPipeline {
-    id: u32,
     quad_info: Vec<QuadInfo>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     color_buffer: wgpu::Buffer,
     model_mat4_buffer: wgpu::Buffer,
-    diffuse_texture: texture::Texture,
+    diffuse_texture: Texture,
     diffuse_bind_group: wgpu::BindGroup,
 }
 
@@ -481,6 +462,7 @@ impl QuadPipeline {
                 as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
+
         let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Color Buffer"),
@@ -538,6 +520,7 @@ impl QuadPipeline {
                 write_mask: wgpu::ColorWrites::ALL,
             })
             .shader(module)
+            // .with_wireframe(true)
             .pipeline_layout_descriptor(
                 "Vertex layout descriptor",
                 &[&texture_bind_group_layout],
@@ -546,14 +529,13 @@ impl QuadPipeline {
             .build(&app_context.device, "Vertex Pipeline", "vs_main", "fs_main");
 
         Self {
-            id: 322,
             quad_info: vec![],
             render_pipeline,
             vertex_buffer,
             color_buffer,
             model_mat4_buffer,
-            diffuse_bind_group,
             diffuse_texture,
+            diffuse_bind_group,
         }
     }
 
@@ -572,7 +554,6 @@ pub struct Engine {
     app_context: Arc<AppContext>,
     quad_pipeline: QuadPipeline,
     line_pipeline: LinePipeline,
-    command_encoder: Arc<Mutex<wgpu::CommandEncoder>>,
 }
 
 impl Engine {
@@ -580,13 +561,10 @@ impl Engine {
         let quad_pipeline = QuadPipeline::new(app_context.clone());
         let line_pipeline = LinePipeline::new(app_context.clone());
 
-        let command_encoder = Arc::new(Mutex::new(app_context.create_command_encoder()));
-
         Self {
             app_context: app_context.clone(),
             quad_pipeline,
             line_pipeline,
-            command_encoder,
         }
     }
 
@@ -616,24 +594,13 @@ impl Engine {
         })
     }
 
-    pub fn end_render(&mut self, mut encoder: wgpu::CommandEncoder, frame: SurfaceTexture) {
-        self.app_context.queue.submit(Some(encoder.finish()));
-        frame.present();
-    }
-
-    pub fn prepare_quad_data(
-        &mut self,
-        position: glam::Mat4,
-        scale: glam::Mat4,
-        rotation: glam::Mat4,
-        color: [f32; 4],
-    ) {
+    pub fn render_quad(&mut self, position: Vec3, scale: Vec3, angle: f32, color: [f32; 4]) {
         self.quad_pipeline.quad_info.push(QuadInfo {
             color,
             transform: TransformComponent {
-                position,
-                scale,
-                rotation,
+                position: Mat4::from_translation(position),
+                scale: Mat4::from_scale(scale),
+                rotation: Mat4::from_rotation_z(angle),
             },
         });
     }
@@ -662,12 +629,12 @@ impl Engine {
                 bytemuck::cast_slice(&quad.color),
             );
 
-            // not needed as we don't have a camera YET
-            // let view = glam::Mat4::look_to_lh(glam::vec3(0.0, 0.0, -1.0), glam::vec3(0.0, 0.0, 0.0), glam::Vec3::Y);
-            let view = glam::Mat4::IDENTITY;
+            // not needed as we don't have a camera YET. To be used later.
+            // let view = Mat4::look_to_lh(vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
+            let _view = Mat4::IDENTITY;
 
             // this is setting up the viewport basically
-            let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+            let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
             let model = quad.transform.position * quad.transform.rotation * quad.transform.scale;
 
             let new_model = proj * model;
@@ -679,10 +646,9 @@ impl Engine {
         }
     }
 
-    pub fn render_quads<'pass>(
+    fn render_quads<'pass>(
         &'pass self,
         render_pass: &mut RenderPass<'pass>,
-        queue: &wgpu::Queue,
         device: &wgpu::Device,
     ) {
         render_pass.set_pipeline(&self.quad_pipeline.render_pipeline);
@@ -706,7 +672,7 @@ impl Engine {
         };
         // dbg!(transform_uniform_size); // 192
         // dbg!(transform_uniform_alignment); // 256
-        // dbg!(std::mem::size_of::<glam::Mat4>()); // 64
+        // dbg!(std::mem::size_of::<Mat4>()); // 64
         // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
@@ -722,10 +688,9 @@ impl Engine {
             render_pass.draw(0..6, 0..1);
         }
     }
-    pub fn render_lines<'pass>(
+    fn render_lines<'pass>(
         &'pass self,
         render_pass: &mut RenderPass<'pass>,
-        queue: &wgpu::Queue,
         device: &wgpu::Device,
     ) {
         render_pass.set_pipeline(&self.line_pipeline.render_pipeline);
@@ -749,7 +714,7 @@ impl Engine {
         };
         // dbg!(transform_uniform_size); // 192
         // dbg!(transform_uniform_alignment); // 256
-        // dbg!(std::mem::size_of::<glam::Mat4>()); // 64
+        // dbg!(std::mem::size_of::<Mat4>()); // 64
         // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _line) in self.line_pipeline.line_info.iter().enumerate() {
@@ -767,12 +732,12 @@ impl Engine {
         }
     }
 
-    pub fn prepare_line_data(&mut self, orig: glam::Vec3, dest: glam::Vec3, color: [f32; 4]) {
+    pub fn render_line(&mut self, orig: Vec3, dest: Vec3, color: [f32; 4]) {
         self.line_pipeline.line_info.push(LineInfo {
             color,
             transform: LineComponent {
-                orig: glam::Mat4::from_translation(orig),
-                dest: glam::Mat4::from_translation(dest),
+                orig: Mat4::from_translation(orig),
+                dest: Mat4::from_translation(dest),
             },
         });
     }
@@ -799,17 +764,17 @@ impl Engine {
                 bytemuck::cast_slice(&line.color),
             );
 
-            // not needed as we don't have a camera YET
-            // let view = glam::Mat4::look_to_lh(glam::vec3(0.0, 0.0, -1.0), glam::vec3(0.0, 0.0, 0.0), glam::Vec3::Y);
-            let view = glam::Mat4::IDENTITY;
+            // not needed as we don't have a camera YET. To be used later.
+            // let view = Mat4::look_to_lh(vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
+            let _view = Mat4::IDENTITY;
 
             // this is setting up the viewport basically
-            let proj = glam::Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+            let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
 
             let new_model = proj * line.transform.orig;
             let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
             self.app_context.queue.write_buffer(
-                &self.line_pipeline.model_mat4_buffer,
+                &self.line_pipeline.orig_model_mat4_buffer,
                 transform_uniform_offset as wgpu::BufferAddress,
                 bytemuck::cast_slice(&new_model.to_cols_array_2d()),
             );
@@ -817,7 +782,7 @@ impl Engine {
             let new_model = proj * line.transform.dest;
             let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
             self.app_context.queue.write_buffer(
-                &self.line_pipeline.model_mat4_buffer2,
+                &self.line_pipeline.dest_model_mat4_buffer,
                 transform_uniform_offset as wgpu::BufferAddress,
                 bytemuck::cast_slice(&new_model.to_cols_array_2d()),
             );
@@ -835,25 +800,28 @@ pub enum MyEvent {
 
 pub async fn async_runner(mut app: impl Application + 'static) {
     let event_loop = EventLoop::new().unwrap();
-    let application_window_size = winit::dpi::PhysicalSize::new(800.0, 600.0);
     let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
-    let main_window = Arc::new(WindowBuilder::new()
-        .with_inner_size(application_window_size2)
-        .with_title("Game")
-        .build(&event_loop)
-        .unwrap());
+    let main_window = Arc::new(
+        WindowBuilder::new()
+            .with_inner_size(application_window_size2)
+            .with_title("Game")
+            .build(&event_loop)
+            .unwrap(),
+    );
 
     // IMPORTANT: this is different than before because I had added AppContext inside App along with Renderer
     let app_context = Arc::new(AppContext::new(main_window.clone()).await.unwrap());
 
     let mut engine = Engine::new(app_context.clone());
 
-    let _ = event_loop.run(move |event, event_loop| match event {
-        Event::WindowEvent { window_id, event } => match event {
+    let _ = event_loop.run(move |event, _event_loop| match event {
+        Event::WindowEvent {
+            window_id: _,
+            event,
+        } => match event {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        state,
                         physical_key: PhysicalKey::Code(KeyCode::KeyQ),
                         ..
                     },
@@ -907,21 +875,22 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("pixels_command_encoder"),
                         });
+                
 
-                // IMPORTANT:
-                // Identity values:
-                // pos is 0
-                // scale is 1
-                // rot is 0
-
-                // RENDERING
+                ///////////////////////////
+                //////// RENDERING //////// 
+                ///////////////////////////
                 engine.update_quad_data(&app_context.device);
                 engine.update_line_data(&app_context.device);
                 {
                     let mut rpass = engine.begin_render(&mut encoder, &view);
-                    engine.render_quads(&mut rpass, &app_context.queue, &app_context.device);
-                    engine.render_lines(&mut rpass, &app_context.queue, &app_context.device);
+                    engine.render_quads(&mut rpass, &app_context.device);
+                    engine.render_lines(&mut rpass, &app_context.device);
                 }
+                ///////////////////////////
+                //////// RENDERING //////// 
+                ///////////////////////////
+
 
                 engine.quad_pipeline.quad_info.clear();
                 engine.line_pipeline.line_info.clear();
@@ -935,7 +904,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
             _ => (),
         },
         Event::DeviceEvent {
-            event: DeviceEvent::MouseMotion { delta },
+            event: DeviceEvent::MouseMotion { delta: _ },
             ..
         } => (),
         _ => (),

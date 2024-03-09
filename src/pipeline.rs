@@ -1,3 +1,4 @@
+#![allow(unused)]
 pub trait VertexDescriptor<'a> {
     fn desc() -> wgpu::VertexBufferLayout<'a>;
 }
@@ -57,8 +58,8 @@ impl<'a> RenderPipelineBuilder<'a> {
     }
 
     #[allow(unused)]
-    pub fn with_wireframe(mut self) -> Self {
-        self.wireframe = true;
+    pub fn with_wireframe(mut self, is_wireframe: bool) -> Self {
+        self.wireframe = is_wireframe;
         self
     }
 
