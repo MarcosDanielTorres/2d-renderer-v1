@@ -19,12 +19,17 @@ use wgpu::RenderPass;
 use wgpu::SurfaceConfiguration;
 use wgpu::SurfaceTexture;
 use wgpu::TextureView;
+
+use winit::event::KeyEvent;
+use winit::keyboard::KeyCode;
+
 use winit::event::DeviceEvent;
 use winit::event::ElementState;
 use winit::window::Fullscreen;
 use winit::{
-    event::{Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event::{Event, WindowEvent},
     event_loop::*,
+    keyboard::PhysicalKey,
     window::WindowBuilder,
 };
 
@@ -820,38 +825,37 @@ impl Engine {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum MyEvent {
     KeyboardInput {
         state: ElementState,
-        virtual_keycode: VirtualKeyCode,
+        physical_key: PhysicalKey,
     },
 }
 
 pub async fn async_runner(mut app: impl Application + 'static) {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let application_window_size = winit::dpi::PhysicalSize::new(800.0, 600.0);
     let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
-    let main_window = WindowBuilder::new()
+    let main_window = Arc::new(WindowBuilder::new()
         .with_inner_size(application_window_size2)
         .with_title("Game")
         .build(&event_loop)
-        .unwrap();
+        .unwrap());
 
     // IMPORTANT: this is different than before because I had added AppContext inside App along with Renderer
-    let app_context = Arc::new({ AppContext::new(&main_window).await });
+    let app_context = Arc::new(AppContext::new(main_window.clone()).await.unwrap());
 
     let mut engine = Engine::new(app_context.clone());
 
-    event_loop.run(move |event, _, control_flow| match event {
+    let _ = event_loop.run(move |event, event_loop| match event {
         Event::WindowEvent { window_id, event } => match event {
             WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        scancode,
+                event:
+                    KeyEvent {
                         state,
-                        virtual_keycode: Some(VirtualKeyCode::Q),
-                        modifiers,
+                        physical_key: PhysicalKey::Code(KeyCode::KeyQ),
+                        ..
                     },
                 ..
             } => {
@@ -859,80 +863,81 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                 panic!("Closed");
             }
             WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        scancode,
+                event:
+                    KeyEvent {
                         state,
-                        virtual_keycode,
-                        modifiers,
+                        physical_key,
+                        ..
                     },
                 ..
             } => {
                 let new_event = MyEvent::KeyboardInput {
                     state,
-                    virtual_keycode: virtual_keycode.unwrap(),
+                    physical_key,
                 };
 
                 dbg!(new_event);
 
                 app.on_event(&mut engine, new_event);
             }
+
+            WindowEvent::RedrawRequested => {
+                app.on_update(&mut engine);
+
+                app.on_render(&mut engine);
+                // IMPORTANT:
+                // I can't store a renderpass because it needs a reference to a view and the view will
+                // change upon resizing
+                let frame = app_context
+                    .surface
+                    .get_current_texture()
+                    .or_else(|_| {
+                        app_context.reconfigure_surface();
+                        app_context.surface.get_current_texture()
+                    })
+                    .unwrap();
+
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                let mut encoder =
+                    app_context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("pixels_command_encoder"),
+                        });
+
+                // IMPORTANT:
+                // Identity values:
+                // pos is 0
+                // scale is 1
+                // rot is 0
+
+                // RENDERING
+                engine.update_quad_data(&app_context.device);
+                engine.update_line_data(&app_context.device);
+                {
+                    let mut rpass = engine.begin_render(&mut encoder, &view);
+                    engine.render_quads(&mut rpass, &app_context.queue, &app_context.device);
+                    engine.render_lines(&mut rpass, &app_context.queue, &app_context.device);
+                }
+
+                engine.quad_pipeline.quad_info.clear();
+                engine.line_pipeline.line_info.clear();
+
+                app_context.queue.submit(Some(encoder.finish()));
+                frame.present();
+
+                main_window.request_redraw();
+            }
+
             _ => (),
         },
         Event::DeviceEvent {
             event: DeviceEvent::MouseMotion { delta },
             ..
         } => (),
-        Event::RedrawRequested(_window_id) => {
-            app.on_update(&mut engine);
-
-            app.on_render(&mut engine);
-            // IMPORTANT:
-            // I can't store a renderpass because it needs a reference to a view and the view will
-            // change upon resizing
-            let frame = app_context
-                .surface
-                .get_current_texture()
-                .or_else(|_| {
-                    app_context.reconfigure_surface();
-                    app_context.surface.get_current_texture()
-                })
-                .unwrap();
-
-            let view = frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-
-            let mut encoder =
-                app_context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("pixels_command_encoder"),
-                    });
-
-            // IMPORTANT:
-            // Identity values:
-            // pos is 0
-            // scale is 1
-            // rot is 0
-
-            // RENDERING
-            engine.update_quad_data(&app_context.device);
-            engine.update_line_data(&app_context.device);
-            {
-                let mut rpass = engine.begin_render(&mut encoder, &view);
-                engine.render_quads(&mut rpass, &app_context.queue, &app_context.device);
-                engine.render_lines(&mut rpass, &app_context.queue, &app_context.device);
-            }
-
-            engine.quad_pipeline.quad_info.clear();
-            engine.line_pipeline.line_info.clear();
-
-            app_context.queue.submit(Some(encoder.finish()));
-            frame.present();
-
-            main_window.request_redraw();
-        }
         _ => (),
-    })
+    });
 }

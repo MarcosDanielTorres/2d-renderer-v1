@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-winit = "0.28.6"
+winit = "0.29.0"
 glam = "0.24.2"
-wgpu = { version = "0.18", features = ["glsl"] }
+wgpu = { version = "0.19", features = ["glsl"] }
 env_logger = "0.10"
 log = "0.4"
 pollster = "0.3.0"
