@@ -1,8 +1,7 @@
 #![allow(unused, dead_code)]
-use std::f32::consts::{FRAC_PI_4, FRAC_PI_2, FRAC_PI_6, FRAC_PI_8, FRAC_2_PI};
+use std::f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8};
 
-use nalgebra;
-use winit::event::{Event, VirtualKeyCode, WindowEvent};
+use winit::{event::{Event, WindowEvent, ElementState}, keyboard::{PhysicalKey, KeyCode}};
 
 use bm::async_runner;
 
@@ -118,46 +117,79 @@ impl<'a> EnemyContainer<'a> {
 struct Player {
     x: f32,
     y: f32,
+
+    amount_down: f32,
+    amount_up: f32,
+    amount_left: f32,
+    amount_right: f32,
+
     scale_x: f32,
     scale_y: f32,
     speed: f32,
 }
 
 impl Player {
-    pub fn update(&self, engine: &mut bm::Engine) {
+    pub fn update(&mut self, engine: &mut bm::Engine) {
         println!("player: {:?}", (self.x, self.y));
+        println!("amount_right: {:?}", self.amount_right);
+        self.x += (self.amount_right + self.amount_left) * self.speed;
+        self.y += (self.amount_up + self.amount_down) * self.speed;
     }
 
     pub fn on_event(&mut self, event: bm::MyEvent) {
-        // dbg!("player pos: ({}, {})", self.x, self.y);
+
+        let amount = match event {
+            bm::MyEvent::KeyboardInput {
+                state: ElementState::Pressed,
+                ..
+            } => {
+                1.0
+            },
+            bm::MyEvent::KeyboardInput {
+                state: ElementState::Released,
+                ..
+            } => {
+                0.0
+            },
+        };
+
+
         match event {
             bm::MyEvent::KeyboardInput {
-                state: winit::event::ElementState::Pressed,
-                virtual_keycode: VirtualKeyCode::W,
+                    physical_key: PhysicalKey::Code(KeyCode::KeyW),
+                    ..
             } => {
-                self.y += 0.003 * self.speed;
-            }
+                // self.y += 0.003 * self.speed;
+                 self.amount_up = amount;
+            },
+
             bm::MyEvent::KeyboardInput {
-                state: winit::event::ElementState::Pressed,
-                virtual_keycode: VirtualKeyCode::S,
-            } => {
-                self.y -= 0.003 * self.speed;
+                physical_key: PhysicalKey::Code(KeyCode::KeyS),
+                ..
+            } =>{
+                // self.y -= 0.003 * self.speed;
+                self.amount_down = -amount;
             }
+
             bm::MyEvent::KeyboardInput {
-                state: winit::event::ElementState::Pressed,
-                virtual_keycode: VirtualKeyCode::A,
-            } => {
-                self.x -= 0.003 * self.speed;
+                physical_key: PhysicalKey::Code(KeyCode::KeyA),
+                ..
+            } =>{
+                // self.x -= 0.003 * self.speed;
+                self.amount_left = -amount;
             }
+
             bm::MyEvent::KeyboardInput {
-                state: winit::event::ElementState::Pressed,
-                virtual_keycode: VirtualKeyCode::D,
-            } => {
-                self.x += 0.003 * self.speed;
-            }
-            _ => (),
+                physical_key: PhysicalKey::Code(KeyCode::KeyD),
+                ..
+            }=>{
+                // self.x += 0.003 * self.speed;
+                self.amount_right = amount;
+            },
+            _ => ()
         }
     }
+    
 
     pub fn on_render(&self, engine: &mut bm::Engine) {
         // player
@@ -236,9 +268,15 @@ impl<'a> App<'a> {
         let player = Player {
             x: 400.0,
             y: 300.0,
+
+            amount_up: 0.0,
+            amount_down: 0.0,
+            amount_left: 0.0,
+            amount_right: 0.0,
+
             scale_x: 80.0,
             scale_y: 80.0,
-            speed: 500.0,
+            speed: 5.0,
         };
         Self { container, player }
     }

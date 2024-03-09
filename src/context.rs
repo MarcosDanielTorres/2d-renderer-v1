@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use crate::texture::{self, Texture};
 
 pub struct AppContext {
-    pub surface: wgpu::Surface,
+    pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -11,7 +13,7 @@ pub struct AppContext {
 }
 
 impl AppContext {
-    pub async fn new(main_window: &winit::window::Window) -> Self {
+    pub async fn new(main_window: Arc<winit::window::Window>) -> anyhow::Result<Self> {
         let size = main_window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -21,10 +23,10 @@ impl AppContext {
             gles_minor_version: Default::default(),
         });
 
-        let surface = unsafe { instance.create_surface(&main_window) }.unwrap();
+        let surface = instance.create_surface(main_window.clone())?;
 
-        let mut features = wgpu::Features::empty();
-        features.insert(wgpu::Features::POLYGON_MODE_LINE);
+        let mut required_features = wgpu::Features::empty();
+        required_features.insert(wgpu::Features::POLYGON_MODE_LINE);
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -40,8 +42,8 @@ impl AppContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features,
-                    limits: if cfg!(target_arch = "wasm32") {
+                    required_features,
+                    required_limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
                     } else {
                         wgpu::Limits::default()
@@ -69,6 +71,7 @@ impl AppContext {
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
             // present_mode: surface_caps.present_modes[1],
+            desired_maximum_frame_latency: 2,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -79,7 +82,7 @@ impl AppContext {
 
         surface.configure(&device, &config);
 
-        Self {
+        Ok(Self {
             device,
             queue,
             surface,
@@ -87,7 +90,7 @@ impl AppContext {
             size,
             texture,
             render_texture_format,
-        }
+        })
     }
 
     pub fn create_command_encoder(&self) -> wgpu::CommandEncoder {
