@@ -1,5 +1,8 @@
 use glam::*;
 
+use std::fs;
+use std::num::NonZeroU32;
+use std::path::Path;
 use std::sync::Arc;
 use wgpu::RenderPass;
 
@@ -25,7 +28,7 @@ use crate::context::AppContext;
 use crate::pipeline::RenderPipelineBuilder;
 use crate::pipeline::VertexDescriptor;
 
-use wgpu::util::{align_to, DeviceExt};
+use wgpu::util::{align_to, DeviceExt, BufferInitDescriptor};
 
 pub trait Application {
     fn on_update(&mut self, engine: &mut Engine);
@@ -178,8 +181,8 @@ impl LinePipeline {
                 as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        // println!("LINE COLOR BUFFER ALIG: {:?}", color_uniform_alignment);
-        // panic!("LINE");
+
+
         let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Line Color Buffer"),
@@ -187,6 +190,7 @@ impl LinePipeline {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        
 
         let line_bind_group = app_context
             .device
@@ -269,6 +273,8 @@ struct QuadInfo {
     // updated for every `draw_quad`
     transform: TransformComponent,
     color: [f32; 4],
+    // texture_path: Option<&'static Path>,
+    texture_path: Option<&'static [u8]>,
 }
 
 struct QuadPipeline {
@@ -380,13 +386,94 @@ impl QuadPipeline {
 
         // textures
         let diffuse_bytes = include_bytes!("happy-tree.png");
-        let diffuse_texture = Texture::from_bytes(
-            &app_context.device,
-            &app_context.queue,
-            diffuse_bytes,
-            "Happy tree",
-        )
-        .unwrap();
+        // let diffuse_texture = Texture::from_bytes(
+        //     &app_context.device,
+        //     &app_context.queue,
+        //     diffuse_bytes,
+        //     "Happy tree",
+        // )
+        // .unwrap();
+
+
+
+
+        let diffuse_texture = {
+            let rgba = img.to_rgba8();
+            let dimensions = img.dimensions();
+
+            let texture_extent = wgpu::Extent3d {
+                width: dimensions.0,
+                height: dimensions.1,
+                depth_or_array_layers: 1,
+            };
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label,
+                size: texture_extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            });
+
+            // dimensions are 256 x 256 for `happy-tree.png`
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    aspect: wgpu::TextureAspect::All,
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                },
+                &rgba,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    // bytes_per_row: Some(4 * dimensions.0),
+                    // rows_per_image: Some(dimensions.1),
+                    bytes_per_row: Some(4 * dimensions.0),
+                    rows_per_image: Some(dimensions.1),
+                },
+                texture_extent,
+            );
+
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
+
+            Texture {
+                texture,
+                texture_view,
+                texture_sampler,
+                texture_extent,
+            }
+        };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
         let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
@@ -403,13 +490,13 @@ impl QuadPipeline {
                                 view_dimension: wgpu::TextureViewDimension::D2,
                                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
                             },
-                            count: None,
+                            count: NonZeroU32::new(10),
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
+                            count: NonZeroU32::new(10),
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 2,
@@ -463,13 +550,42 @@ impl QuadPipeline {
             align_to(color_uniform_size, alignment)
         };
 
-        let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-        let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Color Buffer"),
-            size: 40 * color_uniform_alignment,
+
+
+
+        ////////////////////////////////////////
+        /////////////// QUAD ///////////////////
+        //////// DEFAULT COLOR VALUE ///////////
+        ////////////////////////////////////////
+
+        // color_uniform_alignment = 256. Its too high, thats why I thought both ways would workd
+        // and it seemed they are. But this is just allocating space in the buffer for future use.
+        // with default color value
+        // for 40 colors actually
+        let color_slice: [f32; 400] = [1.0; 400];
+        let color_buffer = app_context.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Line Color Buffer"),
+            contents: bytemuck::cast_slice(&color_slice),
+            // size: 40 * color_uniform_alignment,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+            // mapped_at_creation: false,
         });
+
+        // with no default color value
+        //
+        // let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        // let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+        //     label: Some("Line Color Buffer"),
+        //     size: 2 * color_uniform_alignment,
+        //     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        //     mapped_at_creation: false,
+        // });
+        
+        ////////////////////////////////////////
+        /////////////// QUAD ///////////////////
+        //////// DEFAULT COLOR VALUE ///////////
+        ////////////////////////////////////////
+
 
         let diffuse_bind_group = app_context
             .device
@@ -594,9 +710,10 @@ impl Engine {
         })
     }
 
-    pub fn render_quad(&mut self, position: Vec3, scale: Vec3, angle: f32, color: [f32; 4]) {
+    pub fn render_quad(&mut self, position: Vec3, scale: Vec3, angle: f32, color: [f32; 4], texture_path: Option<&'static [u8]>) {
         self.quad_pipeline.quad_info.push(QuadInfo {
             color,
+            texture_path,
             transform: TransformComponent {
                 position: Mat4::from_translation(position),
                 scale: Mat4::from_scale(scale),
@@ -619,6 +736,9 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(transform_uniform_size, alignment)
         };
+
+        println!("COLOR UNIFORM ALIGNMENT {:?}", color_uniform_alignment);
+        println!("TRANSFORM UNIFORM ALIGNMENT {:?}", transform_uniform_alignment);
 
         for (i, quad) in self.quad_pipeline.quad_info.iter_mut().enumerate() {
             let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
@@ -643,6 +763,19 @@ impl Engine {
                 transform_uniform_offset as wgpu::BufferAddress,
                 bytemuck::cast_slice(&new_model.to_cols_array_2d()),
             );
+            
+
+            /////////////////////////////////////////////
+
+            if let Some(texture_path) = quad.texture_path  {
+                // let src: String = fs::read_to_string(texture_path).unwrap().parse().unwrap();
+                // // let bytes = include_bytes!(src);
+                // let bytes = src.as_bytes();
+                let diffuse_texture = Texture::from_bytes(&self.app_context.device, &self.app_context.queue, texture_path, "jajajaja").unwrap();
+                // self.app_context.queue.write_buffer()
+            }
+
+            /////////////////////////////////////////////
         }
     }
 
