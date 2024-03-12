@@ -52,7 +52,8 @@ impl<'a> Enemy<'a> {
         let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
         let angle: f32 = 0.0;
 
-        engine.render_quad(position, scale, angle, self.color, Some(include_bytes!("pikachu.png")));
+        // engine.render_quad(position, scale, angle, self.color, Some(include_bytes!("pikachu.png")));
+        engine.render_quad(position, scale, angle, self.color, None);
     }
 }
 
@@ -193,7 +194,8 @@ impl Player {
         // let angle: f32 = FRAC_PI_2;
         // let angle: f32 = 0.0;
 
-        engine.render_quad(position, scale, angle, color, Some(include_bytes!("happy-tree.png")));
+        // engine.render_quad(position, scale, angle, color, Some(include_bytes!("happy-tree.png")));
+        engine.render_quad(position, scale, angle, color, None);
 
         // let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
         // let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);

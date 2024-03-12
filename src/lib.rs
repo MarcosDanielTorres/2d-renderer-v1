@@ -1,5 +1,6 @@
 use glam::*;
 
+use std::collections::HashSet;
 use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -284,6 +285,8 @@ struct QuadPipeline {
     color_buffer: wgpu::Buffer,
     model_mat4_buffer: wgpu::Buffer,
     diffuse_texture: Texture,
+    // texture_map: HashSet<String, Texture>,
+    bind_group: wgpu::BindGroup,
     diffuse_bind_group: wgpu::BindGroup,
 }
 
@@ -386,74 +389,73 @@ impl QuadPipeline {
 
         // textures
         let diffuse_bytes = include_bytes!("happy-tree.png");
-        // let diffuse_texture = Texture::from_bytes(
-        //     &app_context.device,
-        //     &app_context.queue,
-        //     diffuse_bytes,
-        //     "Happy tree",
-        // )
-        // .unwrap();
+        let diffuse_texture = Texture::from_bytes(
+            &app_context.device,
+            &app_context.queue,
+            diffuse_bytes,
+            "Happy tree",
+        )
+        .unwrap();
 
 
 
+        // let diffuse_texture = {
+        //     let rgba = img.to_rgba8();
+        //     let dimensions = img.dimensions();
 
-        let diffuse_texture = {
-            let rgba = img.to_rgba8();
-            let dimensions = img.dimensions();
+        //     let texture_extent = wgpu::Extent3d {
+        //         width: dimensions.0,
+        //         height: dimensions.1,
+        //         depth_or_array_layers: 1,
+        //     };
+        //     let texture = device.create_texture(&wgpu::TextureDescriptor {
+        //         label,
+        //         size: texture_extent,
+        //         mip_level_count: 1,
+        //         sample_count: 1,
+        //         dimension: wgpu::TextureDimension::D2,
+        //         format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        //         view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+        //         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        //     });
 
-            let texture_extent = wgpu::Extent3d {
-                width: dimensions.0,
-                height: dimensions.1,
-                depth_or_array_layers: 1,
-            };
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label,
-                size: texture_extent,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            });
+        //     // dimensions are 256 x 256 for `happy-tree.png`
+        //     queue.write_texture(
+        //         wgpu::ImageCopyTexture {
+        //             aspect: wgpu::TextureAspect::All,
+        //             texture: &texture,
+        //             mip_level: 0,
+        //             origin: wgpu::Origin3d::ZERO,
+        //         },
+        //         &rgba,
+        //         wgpu::ImageDataLayout {
+        //             offset: 0,
+        //             // bytes_per_row: Some(4 * dimensions.0),
+        //             // rows_per_image: Some(dimensions.1),
+        //             bytes_per_row: Some(4 * dimensions.0),
+        //             rows_per_image: Some(dimensions.1),
+        //         },
+        //         texture_extent,
+        //     );
 
-            // dimensions are 256 x 256 for `happy-tree.png`
-            queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    aspect: wgpu::TextureAspect::All,
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                },
-                &rgba,
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    // bytes_per_row: Some(4 * dimensions.0),
-                    // rows_per_image: Some(dimensions.1),
-                    bytes_per_row: Some(4 * dimensions.0),
-                    rows_per_image: Some(dimensions.1),
-                },
-                texture_extent,
-            );
+        //     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        //     let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        //         address_mode_u: wgpu::AddressMode::ClampToEdge,
+        //         address_mode_v: wgpu::AddressMode::ClampToEdge,
+        //         address_mode_w: wgpu::AddressMode::ClampToEdge,
+        //         mag_filter: wgpu::FilterMode::Linear,
+        //         min_filter: wgpu::FilterMode::Nearest,
+        //         mipmap_filter: wgpu::FilterMode::Nearest,
+        //         ..Default::default()
+        //     });
 
-            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            });
-
-            Texture {
-                texture,
-                texture_view,
-                texture_sampler,
-                texture_extent,
-            }
-        };
+        //     Texture {
+        //         texture,
+        //         texture_view,
+        //         texture_sampler,
+        //         texture_extent,
+        //     }
+        // };
 
 
 
@@ -477,6 +479,36 @@ impl QuadPipeline {
 
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
         let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+
+        let bind_group_layout =
+            app_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
+                            },
+                            count: None,
+                        },
+                    ],
+                    label: Some("texture_bind_group_layout"),
+                });
+
         let texture_bind_group_layout =
             app_context
                 .device
@@ -490,32 +522,12 @@ impl QuadPipeline {
                                 view_dimension: wgpu::TextureViewDimension::D2,
                                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
                             },
-                            count: NonZeroU32::new(10),
+                            count: None,
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: NonZeroU32::new(10),
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
-                            },
                             count: None,
                         },
                     ],
@@ -585,6 +597,30 @@ impl QuadPipeline {
         /////////////// QUAD ///////////////////
         //////// DEFAULT COLOR VALUE ///////////
         ////////////////////////////////////////
+        let bind_group = app_context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bind_group"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &color_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(color_uniform_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &model_mat4_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(transform_uniform_size),
+                        }),
+                    },
+                ],
+            });
 
 
         let diffuse_bind_group = app_context
@@ -600,22 +636,6 @@ impl QuadPipeline {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(&diffuse_texture.texture_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &color_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(color_uniform_size),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &model_mat4_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(transform_uniform_size),
-                        }),
                     },
                 ],
             });
@@ -639,7 +659,7 @@ impl QuadPipeline {
             // .with_wireframe(true)
             .pipeline_layout_descriptor(
                 "Vertex layout descriptor",
-                &[&texture_bind_group_layout],
+                &[&texture_bind_group_layout, &bind_group_layout],
                 &[],
             )
             .build(&app_context.device, "Vertex Pipeline", "vs_main", "fs_main");
@@ -650,6 +670,8 @@ impl QuadPipeline {
             vertex_buffer,
             color_buffer,
             model_mat4_buffer,
+
+            bind_group,
             diffuse_texture,
             diffuse_bind_group,
         }
@@ -737,8 +759,8 @@ impl Engine {
             align_to(transform_uniform_size, alignment)
         };
 
-        println!("COLOR UNIFORM ALIGNMENT {:?}", color_uniform_alignment);
-        println!("TRANSFORM UNIFORM ALIGNMENT {:?}", transform_uniform_alignment);
+        // println!("COLOR UNIFORM ALIGNMENT {:?}", color_uniform_alignment);
+        // println!("TRANSFORM UNIFORM ALIGNMENT {:?}", transform_uniform_alignment);
 
         for (i, quad) in self.quad_pipeline.quad_info.iter_mut().enumerate() {
             let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
@@ -809,14 +831,16 @@ impl Engine {
         // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
+            render_pass.set_bind_group(0, &self.quad_pipeline.diffuse_bind_group, &[]);
             render_pass.set_bind_group(
-                0,
-                &self.quad_pipeline.diffuse_bind_group,
+                1,
+                &self.quad_pipeline.bind_group,
                 &[
                     ((i + 1) * color_uniform_alignment as usize) as u32,
                     ((i + 1) * transform_uniform_alignment as usize) as u32,
                 ],
             );
+
             render_pass.set_vertex_buffer(0, self.quad_pipeline.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
         }

@@ -31,13 +31,13 @@ var t_diffuse: texture_2d<f32>;
 @group(0) @binding(1)
 var s_diffuse: sampler;
 // fragment
-@group(0) @binding(2)
+@group(1) @binding(0)
 // TODO: Document better
 // For some reason I need to tag color with 'uniform' as opposed to the fucking textures
 var<uniform> color: vec4<f32>;
 
 // vertex - fragment
-@group(0) @binding(3)
+@group(1) @binding(1)
 var<uniform> model_mat4: mat4x4<f32>;
 
 
