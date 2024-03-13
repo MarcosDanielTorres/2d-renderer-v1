@@ -241,8 +241,8 @@ impl LinePipeline {
             .add_color_target_state(wgpu::ColorTargetState {
                 format: app_context.config.format,
                 blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent::REPLACE,
-                    alpha: wgpu::BlendComponent::REPLACE,
+                    color:wgpu::BlendComponent::REPLACE,
+                    alpha:wgpu::BlendComponent::REPLACE,
                 }),
                 write_mask: wgpu::ColorWrites::ALL,
             })
@@ -655,7 +655,11 @@ impl QuadPipeline {
             .add_color_target_state(wgpu::ColorTargetState {
                 format: app_context.config.format,
                 blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent::REPLACE,
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
                     alpha: wgpu::BlendComponent::REPLACE,
                 }),
                 write_mask: wgpu::ColorWrites::ALL,

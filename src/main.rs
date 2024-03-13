@@ -195,7 +195,7 @@ impl Player {
         // let angle: f32 = 0.0;
 
         // engine.render_quad(position, scale, angle, color, Some(include_bytes!("happy-tree.png")));
-        engine.render_quad(position, scale, 0.0, color, Some(String::from("sims")));
+        engine.render_quad(position, scale, 0.0, color, Some(String::from("pika")));
 
         // let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
         // let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
