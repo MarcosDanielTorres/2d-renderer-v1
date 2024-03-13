@@ -53,7 +53,7 @@ impl<'a> Enemy<'a> {
         let angle: f32 = 0.0;
 
         // engine.render_quad(position, scale, angle, self.color, Some(include_bytes!("pikachu.png")));
-        engine.render_quad(position, scale, angle, self.color, None);
+        engine.render_quad(position, scale, angle, self.color, Some(String::from("tree")));
     }
 }
 
@@ -185,7 +185,7 @@ impl Player {
 
     pub fn on_render(&self, engine: &mut bm::Engine) {
         // player
-        let color: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
+        let color: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let position = Vec3::new(self.x, self.y, 0.0);
         // this is in pixels, which is good
         let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
@@ -195,7 +195,7 @@ impl Player {
         // let angle: f32 = 0.0;
 
         // engine.render_quad(position, scale, angle, color, Some(include_bytes!("happy-tree.png")));
-        engine.render_quad(position, scale, angle, color, None);
+        engine.render_quad(position, scale, 0.0, color, Some(String::from("sims")));
 
         // let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
         // let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
@@ -272,6 +272,7 @@ impl<'a> App<'a> {
         };
         Self { container, player }
     }
+
     fn create_enemies(container: &mut EnemyContainer) {
         let color1: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color2: [f32; 4] = [1.0, 0.0, 0.0, 0.3];
@@ -283,6 +284,14 @@ impl<'a> App<'a> {
 }
 
 impl<'a> bm::Application for App<'a> {
+    fn on_setup(&mut self, engine: &mut bm::Engine) {
+        engine.create_texture(String::from("tree"), "src/happy-tree.png");
+        engine.create_texture(String::from("pika"), "src/default.png");
+        engine.create_texture(String::from("sims"), "src/sims.png");
+        engine.create_texture(String::from("dvd"), "src/power-dvd.jpg");
+        engine.create_texture(String::from("pumpkin"), "src/pumpkin.png");
+    }
+
     fn on_update(&mut self, engine: &mut bm::Engine) {
         self.player.update(engine);
         self.container.on_update(engine, &self.player);

@@ -1,10 +1,13 @@
 use glam::*;
 
+use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::Mutex;
 use wgpu::RenderPass;
 
 use winit::event::KeyEvent;
@@ -32,6 +35,7 @@ use crate::pipeline::VertexDescriptor;
 use wgpu::util::{align_to, DeviceExt, BufferInitDescriptor};
 
 pub trait Application {
+    fn on_setup(&mut self, engine: &mut Engine);
     fn on_update(&mut self, engine: &mut Engine);
     fn on_render(&mut self, engine: &mut Engine);
     fn on_event(&mut self, engine: &mut Engine, event: MyEvent);
@@ -274,8 +278,9 @@ struct QuadInfo {
     // updated for every `draw_quad`
     transform: TransformComponent,
     color: [f32; 4],
+    texture_name: Option<String>,
     // texture_path: Option<&'static Path>,
-    texture_path: Option<&'static [u8]>,
+    // texture_path: Option<&'static [u8]>,
 }
 
 struct QuadPipeline {
@@ -688,21 +693,86 @@ impl QuadPipeline {
 }
 // QUAD
 
+struct BindableTexture {
+    texture: Texture,
+    bind_group: wgpu::BindGroup
+}
+
 pub struct Engine {
     app_context: Arc<AppContext>,
+    pub texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
     quad_pipeline: QuadPipeline,
     line_pipeline: LinePipeline,
 }
 
+
 impl Engine {
-    pub fn new(app_context: Arc<AppContext>) -> Self {
+    pub fn new(app_context: Arc<AppContext>, texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>) -> Self {
         let quad_pipeline = QuadPipeline::new(app_context.clone());
         let line_pipeline = LinePipeline::new(app_context.clone());
 
         Self {
             app_context: app_context.clone(),
+            texture_map,
             quad_pipeline,
             line_pipeline,
+        }
+    }
+
+    pub fn create_texture(&self, id: String, texture_path: &str) {
+        let mut texture_map = self.texture_map.lock().unwrap();
+        if !texture_map.contains_key(&id) {
+            let bytes = std::fs::read(texture_path).unwrap();
+            let texture = Texture::from_bytes(
+                &self.app_context.device,
+                &self.app_context.queue,
+                &bytes,
+                "Happy tree",
+            )
+            .unwrap();
+
+           // this should be reutilizable for all quads that have a texture. 
+            let bind_group_layout = self.app_context.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("texture bindgroup layout"),
+                entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+
+                ] 
+            });
+
+            let bind_group = self.app_context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("texture bindgroup"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture.texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&texture.texture_sampler),
+                    },
+                ],
+            });
+            texture_map.insert(id, BindableTexture {
+                texture,
+                bind_group
+            });
         }
     }
 
@@ -732,10 +802,10 @@ impl Engine {
         })
     }
 
-    pub fn render_quad(&mut self, position: Vec3, scale: Vec3, angle: f32, color: [f32; 4], texture_path: Option<&'static [u8]>) {
+    pub fn render_quad(&mut self, position: Vec3, scale: Vec3, angle: f32, color: [f32; 4], texture_name: Option<String>) {
         self.quad_pipeline.quad_info.push(QuadInfo {
             color,
-            texture_path,
+            texture_name,
             transform: TransformComponent {
                 position: Mat4::from_translation(position),
                 scale: Mat4::from_scale(scale),
@@ -785,24 +855,13 @@ impl Engine {
                 transform_uniform_offset as wgpu::BufferAddress,
                 bytemuck::cast_slice(&new_model.to_cols_array_2d()),
             );
-            
-
-            /////////////////////////////////////////////
-
-            if let Some(texture_path) = quad.texture_path  {
-                // let src: String = fs::read_to_string(texture_path).unwrap().parse().unwrap();
-                // // let bytes = include_bytes!(src);
-                // let bytes = src.as_bytes();
-                let diffuse_texture = Texture::from_bytes(&self.app_context.device, &self.app_context.queue, texture_path, "jajajaja").unwrap();
-                // self.app_context.queue.write_buffer()
-            }
-
-            /////////////////////////////////////////////
         }
     }
 
     fn render_quads<'pass>(
         &'pass self,
+        t2: &'pass TextureMap,
+        texture_map: Arc<Mutex<TextureMap>>,
         render_pass: &mut RenderPass<'pass>,
         device: &wgpu::Device,
     ) {
@@ -830,8 +889,47 @@ impl Engine {
         // dbg!(std::mem::size_of::<Mat4>()); // 64
         // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
-        for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
-            render_pass.set_bind_group(0, &self.quad_pipeline.diffuse_bind_group, &[]);
+
+    // let textures = texture_map.lock().unwrap();
+    for (i, quad) in self.quad_pipeline.quad_info.iter().enumerate() {
+        if let Some(id) = &quad.texture_name {
+            let bind_group = &t2.get(id).unwrap().bind_group;
+                // Use the bind group directly inside the scope where `textures` is valid.
+                render_pass.set_bind_group(0, &bind_group, &[]);
+                render_pass.set_bind_group(
+                    1,
+                    &self.quad_pipeline.bind_group,
+                    &[
+                        ((i + 1) * color_uniform_alignment as usize) as u32,
+                        ((i + 1) * transform_uniform_alignment as usize) as u32,
+                    ],
+                );
+                render_pass.set_vertex_buffer(0, self.quad_pipeline.vertex_buffer.slice(..));
+                render_pass.draw(0..6, 0..1);
+        } else {
+            // Provide a more informative message or handle the case more gracefully.
+            unimplemented!("No texture name provided for quad.");
+        }
+    }
+
+
+
+
+
+
+/* 
+        for (i, quad) in self.quad_pipeline.quad_info.iter().enumerate() {
+            // original one line below
+            // render_pass.set_bind_group(0, &self.quad_pipeline.diffuse_bind_group, &[]);
+            if quad.texture_name.is_none() {
+                unimplemented!("No seas hijo de puta")
+            }
+
+            let id = quad.texture_name.clone().unwrap();
+            let textures = self.texture_map.lock().unwrap();
+            let bind_group = &textures.get(&id).unwrap().bind_group;
+
+            render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.set_bind_group(
                 1,
                 &self.quad_pipeline.bind_group,
@@ -844,6 +942,10 @@ impl Engine {
             render_pass.set_vertex_buffer(0, self.quad_pipeline.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
         }
+        */
+
+
+
     }
     fn render_lines<'pass>(
         &'pass self,
@@ -955,6 +1057,8 @@ pub enum MyEvent {
     },
 }
 
+pub type TextureMap = HashMap<String, BindableTexture>;
+
 pub async fn async_runner(mut app: impl Application + 'static) {
     let event_loop = EventLoop::new().unwrap();
     let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
@@ -969,8 +1073,11 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     // IMPORTANT: this is different than before because I had added AppContext inside App along with Renderer
     let app_context = Arc::new(AppContext::new(main_window.clone()).await.unwrap());
 
-    let mut engine = Engine::new(app_context.clone());
+    let texture_map: Arc<Mutex<TextureMap>> = Arc::new(Mutex::new(HashMap::new()));
 
+    let mut engine = Engine::new(app_context.clone(), texture_map.clone());
+
+    app.on_setup(&mut engine);
     let _ = event_loop.run(move |event, _event_loop| match event {
         Event::WindowEvent {
             window_id: _,
@@ -1039,9 +1146,10 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                 ///////////////////////////
                 engine.update_quad_data(&app_context.device);
                 engine.update_line_data(&app_context.device);
+                let t2 = texture_map.lock().unwrap();
                 {
                     let mut rpass = engine.begin_render(&mut encoder, &view);
-                    engine.render_quads(&mut rpass, &app_context.device);
+                    engine.render_quads(&t2, texture_map.clone(), &mut rpass, &app_context.device);
                     engine.render_lines(&mut rpass, &app_context.device);
                 }
                 ///////////////////////////
