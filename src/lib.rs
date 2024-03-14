@@ -986,6 +986,7 @@ impl Engine {
         }
     }
 
+  
     pub fn begin_render<'rpass, 'a: 'rpass>(
         &'rpass self,
         encoder: &'a mut wgpu::CommandEncoder,
@@ -1294,6 +1295,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
         }
     }
 
+
     // engine.create_magenta_texture(String::from("1px-magenta"), bytemuck::cast_slice(&pixels));
     println!("{:?}", &pixels);
     let xd: &[u8] = bytemuck::cast_slice(&pixels);
@@ -1308,6 +1310,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
         main_window.scale_factor() as f32,
         app_context.clone(),
     );
+
 
     app.on_setup(&mut engine);
     let _ = event_loop.run(move |event, _event_loop| match event {
@@ -1375,9 +1378,11 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                             label: Some("pixels_command_encoder"),
                         });
 
+
                 /////////////////////////////////////////////////
                 ////////////////// RENDERING ////////////////////
                 /////////////////////////////////////////////////
+              
                 engine.update_quad_data(&app_context.device);
                 engine.update_line_data(&app_context.device);
                 let texture_map = texture_map.lock().unwrap();
@@ -1386,6 +1391,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                     engine.render_quads(&texture_map, &mut rpass, &app_context.device);
                     engine.render_lines(&mut rpass, &app_context.device);
                 }
+
                 {
 
                     framework.render(&mut encoder, &view, &app_context);
@@ -1393,6 +1399,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                 /////////////////////////////////////////////////
                 ////////////////// RENDERING ////////////////////
                 /////////////////////////////////////////////////
+
 
                 engine.quad_pipeline.quad_info.clear();
                 engine.line_pipeline.line_info.clear();
