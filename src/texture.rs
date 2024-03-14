@@ -147,7 +147,6 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
-        println!("Texture extent: {:?}", texture_extent);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size: texture_extent,
