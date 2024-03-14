@@ -10,6 +10,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use wgpu::RenderPass;
 
+mod gui;
+
+
 use winit::event::KeyEvent;
 use winit::keyboard::KeyCode;
 
@@ -29,6 +32,7 @@ use texture::Texture;
 
 use crate::context::AppContext;
 
+use crate::gui::Framework;
 use crate::pipeline::RenderPipelineBuilder;
 use crate::pipeline::VertexDescriptor;
 
@@ -982,9 +986,10 @@ impl Engine {
         }
     }
 
-    pub fn begin_render<'rpass>(
+  
+    pub fn begin_render<'rpass, 'a: 'rpass>(
         &'rpass self,
-        encoder: &'rpass mut wgpu::CommandEncoder,
+        encoder: &'a mut wgpu::CommandEncoder,
         view: &'rpass wgpu::TextureView,
     ) -> RenderPass<'rpass> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1290,6 +1295,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
         }
     }
 
+
     // engine.create_magenta_texture(String::from("1px-magenta"), bytemuck::cast_slice(&pixels));
     println!("{:?}", &pixels);
     let xd: &[u8] = bytemuck::cast_slice(&pixels);
@@ -1297,13 +1303,23 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     engine.create_dummy_texture_u32(String::from("1px-white"), bytemuck::cast_slice(&pixels));
 
     // engine.create_texture(id, texture_path)
+    let mut framework = Framework::new(
+        main_window.clone(),
+        main_window.inner_size().width,
+        main_window.inner_size().height,
+        main_window.scale_factor() as f32,
+        app_context.clone(),
+    );
+
 
     app.on_setup(&mut engine);
     let _ = event_loop.run(move |event, _event_loop| match event {
         Event::WindowEvent {
             window_id: _,
             event,
-        } => match event {
+        } => {
+            framework.handle_event(&event);
+            match event {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -1335,6 +1351,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
             }
 
             WindowEvent::RedrawRequested => {
+                framework.prepare();
                 app.on_update(&mut engine);
 
                 app.on_render(&mut engine);
@@ -1361,9 +1378,11 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                             label: Some("pixels_command_encoder"),
                         });
 
-                ///////////////////////////
-                //////// RENDERING ////////
-                ///////////////////////////
+
+                /////////////////////////////////////////////////
+                ////////////////// RENDERING ////////////////////
+                /////////////////////////////////////////////////
+              
                 engine.update_quad_data(&app_context.device);
                 engine.update_line_data(&app_context.device);
                 let texture_map = texture_map.lock().unwrap();
@@ -1372,9 +1391,15 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                     engine.render_quads(&texture_map, &mut rpass, &app_context.device);
                     engine.render_lines(&mut rpass, &app_context.device);
                 }
-                ///////////////////////////
-                //////// RENDERING ////////
-                ///////////////////////////
+
+                {
+
+                    framework.render(&mut encoder, &view, &app_context);
+                }
+                /////////////////////////////////////////////////
+                ////////////////// RENDERING ////////////////////
+                /////////////////////////////////////////////////
+
 
                 engine.quad_pipeline.quad_info.clear();
                 engine.line_pipeline.line_info.clear();
@@ -1386,7 +1411,8 @@ pub async fn async_runner(mut app: impl Application + 'static) {
             }
 
             _ => (),
-        },
+        }
+    }
         Event::DeviceEvent {
             event: DeviceEvent::MouseMotion { delta: _ },
             ..
