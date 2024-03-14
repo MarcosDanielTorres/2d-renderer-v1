@@ -1,13 +1,12 @@
 #![allow(unused, dead_code)]
 use std::f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8};
 
+use bm::async_runner;
 use glam::*;
 use winit::{
     event::{ElementState, Event, WindowEvent},
     keyboard::{KeyCode, PhysicalKey},
 };
-
-use bm::async_runner;
 
 type Label<'a> = Option<&'a str>;
 
@@ -20,18 +19,20 @@ pub struct Enemy<'a> {
     scale_y: f32,
     color: [f32; 4],
     health: f32,
+    texture_id: String,
 }
 
 impl<'a> Enemy<'a> {
-    pub fn new(x: f32, y: f32, color: [f32; 4], label: Label<'a>) -> Self {
+    pub fn new(x: f32, y: f32, color: [f32; 4], label: Label<'a>, texture_id: String) -> Self {
         Self {
             x,
             y,
-            scale_x: 75.0,
-            scale_y: 75.0,
+            scale_x: 175.0,
+            scale_y: 175.0,
             color,
             label,
             health: 100.0,
+            texture_id,
         }
     }
 
@@ -53,7 +54,14 @@ impl<'a> Enemy<'a> {
         let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
         let angle: f32 = 0.0;
 
-        engine.render_quad(position, scale, angle, self.color);
+        // engine.render_quad(position, scale, angle, self.color, Some(include_bytes!("pikachu.png")));
+        engine.render_quad(
+            position,
+            scale,
+            angle,
+            self.color,
+            Some(self.texture_id.clone()),
+        );
     }
 }
 
@@ -185,7 +193,7 @@ impl Player {
 
     pub fn on_render(&self, engine: &mut bm::Engine) {
         // player
-        let color: [f32; 4] = [0.0, 1.0, 1.0, 0.1];
+        let color: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let position = Vec3::new(self.x, self.y, 0.0);
         // this is in pixels, which is good
         let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
@@ -194,7 +202,8 @@ impl Player {
         // let angle: f32 = FRAC_PI_2;
         // let angle: f32 = 0.0;
 
-        engine.render_quad(position, scale, angle, color);
+        // engine.render_quad(position, scale, 0.0, color, Some(String::from("pika")));
+        engine.render_quad(position, scale, 0.0, color, None);
 
         // let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
         // let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
@@ -265,23 +274,34 @@ impl<'a> App<'a> {
             amount_left: 0.0,
             amount_right: 0.0,
 
-            scale_x: 80.0,
-            scale_y: 80.0,
+            scale_x: 120.0,
+            scale_y: 120.0,
             speed: 5.0,
         };
         Self { container, player }
     }
+
     fn create_enemies(container: &mut EnemyContainer) {
         let color1: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color2: [f32; 4] = [1.0, 0.0, 0.0, 0.3];
-        let enemy1 = Enemy::new(200.0, 300.0, color1, Some("Cube 1"));
-        let enemy2 = Enemy::new(300.0, 200.0, color2, Some("Cube 2"));
+        let enemy1 = Enemy::new(200.0, 300.0, color1, Some("Cube 1"), String::from("tree"));
+        let enemy2 = Enemy::new(300.0, 200.0, color2, Some("Cube 2"), String::from("tree"));
+        let enemy_pika = Enemy::new(500.0, 100.0, color1, Some("Cube 2"), String::from("pika"));
         container.add_enemy(enemy1);
         container.add_enemy(enemy2);
+        container.add_enemy(enemy_pika);
     }
 }
 
 impl<'a> bm::Application for App<'a> {
+    fn on_setup(&mut self, engine: &mut bm::Engine) {
+        engine.create_texture(String::from("tree"), "src/happy-tree.png");
+        engine.create_texture(String::from("pika"), "src/default.png");
+        engine.create_texture(String::from("sims"), "src/sims.png");
+        engine.create_texture(String::from("dvd"), "src/power-dvd.jpg");
+        engine.create_texture(String::from("pumpkin"), "src/pumpkin.png");
+    }
+
     fn on_update(&mut self, engine: &mut bm::Engine) {
         self.player.update(engine);
         self.container.on_update(engine, &self.player);

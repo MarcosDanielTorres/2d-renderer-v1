@@ -1,6 +1,13 @@
 use glam::*;
 
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fs;
+use std::num::NonZeroU32;
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::Mutex;
 use wgpu::RenderPass;
 
 use winit::event::KeyEvent;
@@ -25,9 +32,10 @@ use crate::context::AppContext;
 use crate::pipeline::RenderPipelineBuilder;
 use crate::pipeline::VertexDescriptor;
 
-use wgpu::util::{align_to, DeviceExt};
+use wgpu::util::{align_to, BufferInitDescriptor, DeviceExt};
 
 pub trait Application {
+    fn on_setup(&mut self, engine: &mut Engine);
     fn on_update(&mut self, engine: &mut Engine);
     fn on_render(&mut self, engine: &mut Engine);
     fn on_event(&mut self, engine: &mut Engine, event: MyEvent);
@@ -178,8 +186,7 @@ impl LinePipeline {
                 as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
-        // println!("LINE COLOR BUFFER ALIG: {:?}", color_uniform_alignment);
-        // panic!("LINE");
+
         let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Line Color Buffer"),
@@ -269,6 +276,9 @@ struct QuadInfo {
     // updated for every `draw_quad`
     transform: TransformComponent,
     color: [f32; 4],
+    texture_name: Option<String>,
+    // texture_path: Option<&'static Path>,
+    // texture_path: Option<&'static [u8]>,
 }
 
 struct QuadPipeline {
@@ -277,8 +287,14 @@ struct QuadPipeline {
     vertex_buffer: wgpu::Buffer,
     color_buffer: wgpu::Buffer,
     model_mat4_buffer: wgpu::Buffer,
-    diffuse_texture: Texture,
-    diffuse_bind_group: wgpu::BindGroup,
+
+    // This `wgpu::BindGroup`` holds uniform data for the quad that can change every frame
+    bind_group: wgpu::BindGroup,
+
+    // Here I don't need a `wgpu::BindGroup` as this bindgroup is associated to a texture, not a buffer.
+    // So in order to keep remapping textures I need to create one `wgpu::BindGroup` for each texture
+    // and remember the `wgpu::BindGroupLayout`
+    texture_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl QuadPipeline {
@@ -388,8 +404,96 @@ impl QuadPipeline {
         )
         .unwrap();
 
+        // let diffuse_texture = {
+        //     let rgba = img.to_rgba8();
+        //     let dimensions = img.dimensions();
+
+        //     let texture_extent = wgpu::Extent3d {
+        //         width: dimensions.0,
+        //         height: dimensions.1,
+        //         depth_or_array_layers: 1,
+        //     };
+        //     let texture = device.create_texture(&wgpu::TextureDescriptor {
+        //         label,
+        //         size: texture_extent,
+        //         mip_level_count: 1,
+        //         sample_count: 1,
+        //         dimension: wgpu::TextureDimension::D2,
+        //         format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        //         view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+        //         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        //     });
+
+        //     // dimensions are 256 x 256 for `happy-tree.png`
+        //     queue.write_texture(
+        //         wgpu::ImageCopyTexture {
+        //             aspect: wgpu::TextureAspect::All,
+        //             texture: &texture,
+        //             mip_level: 0,
+        //             origin: wgpu::Origin3d::ZERO,
+        //         },
+        //         &rgba,
+        //         wgpu::ImageDataLayout {
+        //             offset: 0,
+        //             // bytes_per_row: Some(4 * dimensions.0),
+        //             // rows_per_image: Some(dimensions.1),
+        //             bytes_per_row: Some(4 * dimensions.0),
+        //             rows_per_image: Some(dimensions.1),
+        //         },
+        //         texture_extent,
+        //     );
+
+        //     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        //     let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        //         address_mode_u: wgpu::AddressMode::ClampToEdge,
+        //         address_mode_v: wgpu::AddressMode::ClampToEdge,
+        //         address_mode_w: wgpu::AddressMode::ClampToEdge,
+        //         mag_filter: wgpu::FilterMode::Linear,
+        //         min_filter: wgpu::FilterMode::Nearest,
+        //         mipmap_filter: wgpu::FilterMode::Nearest,
+        //         ..Default::default()
+        //     });
+
+        //     Texture {
+        //         texture,
+        //         texture_view,
+        //         texture_sampler,
+        //         texture_extent,
+        //     }
+        // };
+
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
         let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+
+        let bind_group_layout =
+            app_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
+                            },
+                            count: None,
+                        },
+                    ],
+                    label: Some("texture_bind_group_layout"),
+                });
+
         let texture_bind_group_layout =
             app_context
                 .device
@@ -409,26 +513,6 @@ impl QuadPipeline {
                             binding: 1,
                             visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
-                            },
                             count: None,
                         },
                     ],
@@ -463,18 +547,69 @@ impl QuadPipeline {
             align_to(color_uniform_size, alignment)
         };
 
-        let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-        let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Color Buffer"),
-            size: 40 * color_uniform_alignment,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        ////////////////////////////////////////
+        /////////////// QUAD ///////////////////
+        //////// DEFAULT COLOR VALUE ///////////
+        ////////////////////////////////////////
 
-        let diffuse_bind_group = app_context
+        // color_uniform_alignment = 256. Its too high, thats why I thought both ways would workd
+        // and it seemed they are. But this is just allocating space in the buffer for future use.
+        // with default color value
+        // for 40 colors actually
+        let color_slice: [f32; 400] = [1.0; 400];
+        let color_buffer = app_context
+            .device
+            .create_buffer_init(&BufferInitDescriptor {
+                label: Some("Line Color Buffer"),
+                contents: bytemuck::cast_slice(&color_slice),
+                // size: 40 * color_uniform_alignment,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                // mapped_at_creation: false,
+            });
+
+        // with no default color value
+        //
+        // let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        // let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+        //     label: Some("Line Color Buffer"),
+        //     size: 2 * color_uniform_alignment,
+        //     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        //     mapped_at_creation: false,
+        // });
+
+        ////////////////////////////////////////
+        /////////////// QUAD ///////////////////
+        //////// DEFAULT COLOR VALUE ///////////
+        ////////////////////////////////////////
+        let bind_group = app_context
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("diffuse_bind_group"),
+                label: Some("bind_group"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &color_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(color_uniform_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &model_mat4_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(transform_uniform_size),
+                        }),
+                    },
+                ],
+            });
+
+        let texture_bind_group = app_context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("texture_bind_group"),
                 layout: &texture_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -484,22 +619,6 @@ impl QuadPipeline {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(&diffuse_texture.texture_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &color_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(color_uniform_size),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &model_mat4_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(transform_uniform_size),
-                        }),
                     },
                 ],
             });
@@ -514,7 +633,11 @@ impl QuadPipeline {
             .add_color_target_state(wgpu::ColorTargetState {
                 format: app_context.config.format,
                 blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent::REPLACE,
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
                     alpha: wgpu::BlendComponent::REPLACE,
                 }),
                 write_mask: wgpu::ColorWrites::ALL,
@@ -523,7 +646,7 @@ impl QuadPipeline {
             // .with_wireframe(true)
             .pipeline_layout_descriptor(
                 "Vertex layout descriptor",
-                &[&texture_bind_group_layout],
+                &[&texture_bind_group_layout, &bind_group_layout],
                 &[],
             )
             .build(&app_context.device, "Vertex Pipeline", "vs_main", "fs_main");
@@ -534,8 +657,12 @@ impl QuadPipeline {
             vertex_buffer,
             color_buffer,
             model_mat4_buffer,
-            diffuse_texture,
-            diffuse_bind_group,
+
+            // uniforms
+            bind_group,
+
+            // textures
+            texture_bind_group_layout,
         }
     }
 
@@ -550,21 +677,308 @@ impl QuadPipeline {
 }
 // QUAD
 
+struct BindableTexture {
+    texture: Texture,
+    bind_group: wgpu::BindGroup,
+}
+
 pub struct Engine {
     app_context: Arc<AppContext>,
+    pub texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
     quad_pipeline: QuadPipeline,
     line_pipeline: LinePipeline,
 }
 
 impl Engine {
-    pub fn new(app_context: Arc<AppContext>) -> Self {
+    pub fn new(
+        app_context: Arc<AppContext>,
+        texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
+    ) -> Self {
         let quad_pipeline = QuadPipeline::new(app_context.clone());
         let line_pipeline = LinePipeline::new(app_context.clone());
 
         Self {
             app_context: app_context.clone(),
+            texture_map,
             quad_pipeline,
             line_pipeline,
+        }
+    }
+
+    pub fn create_dummy_texture_u32(&self, id: String, data: &[u8]) {
+        let mut texture_map = self.texture_map.lock().unwrap();
+
+        if !texture_map.contains_key(&id) {
+            use image::GenericImageView;
+
+            let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+            let pixel_size = match format.block_dimensions() {
+                (1, 1) => format.block_copy_size(None).unwrap() as usize,
+                _ => panic!("Using pixel_size for compressed textures is invalid"),
+            };
+
+            let texture_extent = wgpu::Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            };
+
+            let texture = self
+                .app_context
+                .device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: texture_extent,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    view_formats: &[],
+                    // view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                });
+
+            // dimensions are 256 x 256 for `happy-tree.png`
+            self.app_context.queue.write_texture(
+                // equivanet to wgpu::ImageCopyTexture... etc
+                // texture.as_image_copy()
+                wgpu::ImageCopyTexture {
+                    aspect: wgpu::TextureAspect::All,
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                },
+                &data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    // bytes_per_row: Some(4 * dimensions.0),
+                    bytes_per_row: Some(texture_extent.width * pixel_size as u32),
+                    rows_per_image: None,
+                    // rows_per_image: Some(dimensions.1),
+                },
+                texture_extent,
+            );
+
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let texture_sampler =
+                self.app_context
+                    .device
+                    .create_sampler(&wgpu::SamplerDescriptor {
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Linear,
+                        min_filter: wgpu::FilterMode::Nearest,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        ..Default::default()
+                    });
+
+            let texture = Texture {
+                texture,
+                texture_view,
+                texture_sampler,
+                texture_extent,
+            };
+
+            let bind_group =
+                self.app_context
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("texture bindgroup"),
+                        layout: &self.quad_pipeline.texture_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&texture.texture_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&texture.texture_sampler),
+                            },
+                        ],
+                    });
+
+            texture_map.insert(
+                id,
+                BindableTexture {
+                    texture,
+                    bind_group,
+                },
+            );
+
+
+        }
+    }
+
+    pub fn create_dummy_texture(&self, id: String, data: &[u8]) {
+        let mut texture_map = self.texture_map.lock().unwrap();
+        if !texture_map.contains_key(&id) {
+            use image::GenericImageView;
+
+            let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+            let pixel_size = match format.block_dimensions() {
+                (1, 1) => format.block_copy_size(None).unwrap() as usize,
+                _ => panic!("Using pixel_size for compressed textures is invalid"),
+            };
+
+            // pixel_size = 4
+
+            // let data = vec![data; pixel_size];
+
+            let texture_extent = wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            };
+
+            let texture = self
+                .app_context
+                .device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: texture_extent,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    view_formats: &[],
+                    // view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                });
+
+            // dimensions are 256 x 256 for `happy-tree.png`
+            self.app_context.queue.write_texture(
+                // equivanet to wgpu::ImageCopyTexture... etc
+                // texture.as_image_copy()
+                wgpu::ImageCopyTexture {
+                    aspect: wgpu::TextureAspect::All,
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                },
+                &data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    // bytes_per_row: Some(4 * dimensions.0),
+                    bytes_per_row: Some(texture_extent.width * pixel_size as u32),
+                    rows_per_image: None,
+                    // rows_per_image: Some(dimensions.1),
+                },
+                texture_extent,
+            );
+
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let texture_sampler =
+                self.app_context
+                    .device
+                    .create_sampler(&wgpu::SamplerDescriptor {
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Linear,
+                        min_filter: wgpu::FilterMode::Nearest,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        ..Default::default()
+                    });
+
+            let texture = Texture {
+                texture,
+                texture_view,
+                texture_sampler,
+                texture_extent,
+            };
+
+            let bind_group =
+                self.app_context
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("texture bindgroup"),
+                        layout: &self.quad_pipeline.texture_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&texture.texture_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&texture.texture_sampler),
+                            },
+                        ],
+                    });
+
+            texture_map.insert(
+                id,
+                BindableTexture {
+                    texture,
+                    bind_group,
+                },
+            );
+        }
+    }
+
+    pub fn create_texture(&self, id: String, texture_path: &str) {
+        let mut texture_map = self.texture_map.lock().unwrap();
+        if !texture_map.contains_key(&id) {
+            let bytes = std::fs::read(texture_path).unwrap();
+            let texture = Texture::from_bytes(
+                &self.app_context.device,
+                &self.app_context.queue,
+                &bytes,
+                &id,
+            )
+            .unwrap();
+
+            // This should be reutilizable for all quads that have a texture.
+            let bind_group_layout = self.app_context.device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("texture bindgroup layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                },
+            );
+
+            let bind_group =
+                self.app_context
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("texture bindgroup"),
+                        layout: &bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&texture.texture_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&texture.texture_sampler),
+                            },
+                        ],
+                    });
+            texture_map.insert(
+                id,
+                BindableTexture {
+                    texture,
+                    bind_group,
+                },
+            );
         }
     }
 
@@ -574,7 +988,7 @@ impl Engine {
         view: &'rpass wgpu::TextureView,
     ) -> RenderPass<'rpass> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Render Pass"),
+            label: Some("Render Pass - Clear Color"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
@@ -594,9 +1008,17 @@ impl Engine {
         })
     }
 
-    pub fn render_quad(&mut self, position: Vec3, scale: Vec3, angle: f32, color: [f32; 4]) {
+    pub fn render_quad(
+        &mut self,
+        position: Vec3,
+        scale: Vec3,
+        angle: f32,
+        color: [f32; 4],
+        texture_name: Option<String>,
+    ) {
         self.quad_pipeline.quad_info.push(QuadInfo {
             color,
+            texture_name,
             transform: TransformComponent {
                 position: Mat4::from_translation(position),
                 scale: Mat4::from_scale(scale),
@@ -619,6 +1041,9 @@ impl Engine {
                 device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
             align_to(transform_uniform_size, alignment)
         };
+
+        // println!("COLOR UNIFORM ALIGNMENT {:?}", color_uniform_alignment);
+        // println!("TRANSFORM UNIFORM ALIGNMENT {:?}", transform_uniform_alignment);
 
         for (i, quad) in self.quad_pipeline.quad_info.iter_mut().enumerate() {
             let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
@@ -648,6 +1073,7 @@ impl Engine {
 
     fn render_quads<'pass>(
         &'pass self,
+        texture_map: &'pass TextureMap,
         render_pass: &mut RenderPass<'pass>,
         device: &wgpu::Device,
     ) {
@@ -675,10 +1101,21 @@ impl Engine {
         // dbg!(std::mem::size_of::<Mat4>()); // 64
         // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
-        for (i, _quad) in self.quad_pipeline.quad_info.iter().enumerate() {
+        for (i, quad) in self.quad_pipeline.quad_info.iter().enumerate() {
+            let bind_group: &wgpu::BindGroup;
+
+            if let Some(id) = &quad.texture_name {
+                bind_group = &texture_map.get(id).unwrap().bind_group;
+                render_pass.set_bind_group(0, &bind_group, &[]);
+            } else {
+                bind_group = &texture_map.get("1px-white").unwrap().bind_group;
+                render_pass.set_bind_group(0, &bind_group, &[]);
+            }
+
+            render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.set_bind_group(
-                0,
-                &self.quad_pipeline.diffuse_bind_group,
+                1,
+                &self.quad_pipeline.bind_group,
                 &[
                     ((i + 1) * color_uniform_alignment as usize) as u32,
                     ((i + 1) * transform_uniform_alignment as usize) as u32,
@@ -688,6 +1125,7 @@ impl Engine {
             render_pass.draw(0..6, 0..1);
         }
     }
+
     fn render_lines<'pass>(
         &'pass self,
         render_pass: &mut RenderPass<'pass>,
@@ -798,6 +1236,8 @@ pub enum MyEvent {
     },
 }
 
+pub type TextureMap = HashMap<String, BindableTexture>;
+
 pub async fn async_runner(mut app: impl Application + 'static) {
     let event_loop = EventLoop::new().unwrap();
     let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
@@ -812,8 +1252,53 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     // IMPORTANT: this is different than before because I had added AppContext inside App along with Renderer
     let app_context = Arc::new(AppContext::new(main_window.clone()).await.unwrap());
 
-    let mut engine = Engine::new(app_context.clone());
+    let texture_map: Arc<Mutex<TextureMap>> = Arc::new(Mutex::new(HashMap::new()));
 
+    let mut engine = Engine::new(app_context.clone(), texture_map.clone());
+    // engine.create_dummy_texture(String::from("1px-white"), &[0xFF, 0xFF, 0xFF, 0xFF]);
+    engine.create_dummy_texture(String::from("1px-black"), &[0x00, 0x00, 0x00, 0xFF]);
+    // engine.create_dummy_texture(String::from("1px-black"), bytemuck::cast_slice(&[0xff000000 as u32]));
+    engine.create_dummy_texture(String::from("1px-grey"), &[0xAA, 0xAA, 0xAA, 0xFF]);
+
+    // let x: &[u8] = bytemuck::cast_slice(&[0xff000000 as u32]);
+    // let hdp = &[0x00, 0x00, 0x00, 0xFF];
+    // println!("jajaj  {:?}", &x);
+    // println!("jaja hdp  {:?}", &hdp);
+    // panic!();
+
+    let magenta: u32 = 0xFF00FFFF;
+    // let magenta_ne = magenta.to_ne_bytes();
+    // println!("jaja hdp  {:?}", &magenta_ne);
+    // panic!();
+
+    let magenta_bytes = [0xFF, 0x00, 0xFF, 0xFF];
+    let black: u32 = 0x000000FF;
+    // let black_bytes = black.to_ne_bytes();
+    let black_bytes = [0x00, 0x00, 0x00, 0xFF];
+
+    // let mut pixels = vec![[0; 4]; 16 * 16];
+    let mut pixels: Vec<u32> = vec![0; 16 * 16];
+    for x in 0..16 {
+        for y in 0..16 {
+            if (x % 2) ^ (y % 2) == 1 {
+                // pixels[y * 16 + x] = magenta_bytes;
+                pixels[y * 16 + x] = 0xffff00ff;
+            } else {
+                // pixels[y * 16 + x] = black_bytes;
+                pixels[y * 16 + x] = 0xff000000;
+            }
+        }
+    }
+
+    // engine.create_magenta_texture(String::from("1px-magenta"), bytemuck::cast_slice(&pixels));
+    println!("{:?}", &pixels);
+    let xd: &[u8] = bytemuck::cast_slice(&pixels);
+    println!("{:?}", xd);
+    engine.create_dummy_texture_u32(String::from("1px-white"), bytemuck::cast_slice(&pixels));
+
+    // engine.create_texture(id, texture_path)
+
+    app.on_setup(&mut engine);
     let _ = event_loop.run(move |event, _event_loop| match event {
         Event::WindowEvent {
             window_id: _,
@@ -875,22 +1360,21 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("pixels_command_encoder"),
                         });
-                
 
                 ///////////////////////////
-                //////// RENDERING //////// 
+                //////// RENDERING ////////
                 ///////////////////////////
                 engine.update_quad_data(&app_context.device);
                 engine.update_line_data(&app_context.device);
+                let texture_map = texture_map.lock().unwrap();
                 {
                     let mut rpass = engine.begin_render(&mut encoder, &view);
-                    engine.render_quads(&mut rpass, &app_context.device);
+                    engine.render_quads(&texture_map, &mut rpass, &app_context.device);
                     engine.render_lines(&mut rpass, &app_context.device);
                 }
                 ///////////////////////////
-                //////// RENDERING //////// 
+                //////// RENDERING ////////
                 ///////////////////////////
-
 
                 engine.quad_pipeline.quad_info.clear();
                 engine.line_pipeline.line_info.clear();

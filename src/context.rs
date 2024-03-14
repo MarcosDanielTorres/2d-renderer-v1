@@ -27,6 +27,7 @@ impl AppContext {
 
         let mut required_features = wgpu::Features::empty();
         required_features.insert(wgpu::Features::POLYGON_MODE_LINE);
+        required_features.insert(wgpu::Features::TEXTURE_BINDING_ARRAY);
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
