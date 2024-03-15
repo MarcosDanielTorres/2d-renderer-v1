@@ -1,6 +1,5 @@
 use glam::*;
 
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
@@ -56,6 +55,292 @@ struct LineComponent {
     dest: Mat4,
 }
 
+// START CIRCLE
+// CIRCLE
+
+struct CircleInfo {
+    transform: TransformComponent,
+    color: [f32; 4],
+    thickness: f32,
+    fade: f32,
+    // Radius is not needed because it is in the scale matrix. If scale is 1, then radius is 1.
+}
+
+
+// One pipeline for each type because they have different vertex and fragment shaders.
+struct CirclePipeline {
+    // Data to render
+    circle_info : Vec<CircleInfo>,
+
+    // Pipeline
+    render_pipeline: wgpu::RenderPipeline,
+
+    // Vertex - same as quad. Because it is a quad modified in the fragment shader.
+    vertex_buffer: wgpu::Buffer,
+
+    // Uniforms
+    model_mat4_buffer: wgpu::Buffer,
+    color_buffer: wgpu::Buffer,
+    thickness_buffer: wgpu::Buffer,
+    fade_buffer: wgpu::Buffer,
+}
+
+impl CirclePipeline {
+    pub fn new(app_context: Arc<AppContext>) -> Self {
+        // vertex
+        #[repr(C)]
+        #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Vertex {
+            position: [f32; 3],
+        }
+        impl<'a> VertexDescriptor<'a> for Vertex {
+            fn desc() -> wgpu::VertexBufferLayout<'a> {
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                    ],
+                }
+            }
+        }
+
+        const VERTICES: &[Vertex] = &[
+            // Position of quad at the center
+            Vertex {
+                position: [0.5, 0.5, 0.0],
+            },
+            Vertex {
+                position: [-0.5, 0.5, 0.0],
+            },
+            Vertex {
+                position: [-0.5, -0.5, 0.0],
+            },
+            Vertex {
+                position: [-0.5, -0.5, 0.0],
+            },
+            Vertex {
+                position: [0.5, -0.5, 0.0],
+            },
+            Vertex {
+                position: [0.5, 0.5, 0.0],
+            },
+            // Position of quad at the center
+        ];
+
+
+        let vertex_buffer =
+            app_context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(VERTICES),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+
+        // This `transform_uniform_size` has the same name in all other parts but it should be something related to MAT4
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        let thickness_uniform_size = std::mem::size_of::<f32>() as wgpu::BufferAddress;
+        let fade_uniform_size = std::mem::size_of::<f32>() as wgpu::BufferAddress;
+
+        let bind_group_layout =
+            app_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Circle - BindGroupLayout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(thickness_uniform_size),
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(fade_uniform_size),
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+
+
+        // BUFFER CREATION
+
+        // alignments
+        let transform_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(transform_uniform_size, alignment)
+        };
+
+
+        let thickness_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(thickness_uniform_size, alignment)
+        };
+
+        // this `alignemnt` can be calculated once
+        let fade_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(fade_uniform_size, alignment)
+        };
+
+        // buffers
+        let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Circle - MAT4 Buffer"),
+            size: 40 * transform_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Color doesn't use alignment because I'm initializing it with WHITE.
+        let color_slice: [f32; 400] = [1.0; 400];
+        let color_buffer = app_context
+            .device
+            .create_buffer_init(&BufferInitDescriptor {
+                label: Some("Circle - Color Buffer"),
+                contents: bytemuck::cast_slice(&color_slice),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let thickness_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Circle - Thickness Buffer"),
+            size: 40 * thickness_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let fade_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Circle - Fade Buffer"),
+            size: 40 * thickness_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+
+        let bind_group = app_context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Circle - BindGroup"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &model_mat4_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(color_uniform_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &color_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(transform_uniform_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &thickness_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(thickness_uniform_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &fade_buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(fade_uniform_size),
+                        }),
+                    },
+                ],
+            });
+
+
+        let module = wgpu::ShaderModuleDescriptor {
+            label: Some("Builtin Circle Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/builtin_circle.wgsl").into()),
+        };
+
+        let render_pipeline = RenderPipelineBuilder::new()
+            .add_vertex_buffer_layout::<Vertex>()
+            .add_color_target_state(wgpu::ColorTargetState {
+                format: app_context.config.format,
+                write_mask: wgpu::ColorWrites::ALL,
+            })
+            .shader(module)
+            // .with_wireframe(true)
+            .pipeline_layout_descriptor(
+                "Vertex layout descriptor",
+                &[&bind_group_layout],
+                &[],
+            )
+            .build(&app_context.device, "Vertex Pipeline", "vs_main", "fs_main");
+
+        Self {
+            circle_info: vec![],
+            render_pipeline,
+            vertex_buffer,
+            model_mat4_buffer,
+            color_buffer,
+            thickness_buffer,
+            fade_buffer,
+        }
+    }
+}
+
+
+// START LINE
 // LINE
 struct LineInfo {
     // updated for every `draw_quad`
@@ -64,9 +349,16 @@ struct LineInfo {
 }
 
 struct LinePipeline {
+    // Data to render
     line_info: Vec<LineInfo>,
+
+    // Pipeline
     render_pipeline: wgpu::RenderPipeline,
+
+    // Vertex
     vertex_buffer: wgpu::Buffer,
+
+    // Uniforms
     color_buffer: wgpu::Buffer,
     orig_model_mat4_buffer: wgpu::Buffer,
     dest_model_mat4_buffer: wgpu::Buffer,
@@ -289,6 +581,8 @@ struct QuadPipeline {
     quad_info: Vec<QuadInfo>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+
+    // Uniforms
     color_buffer: wgpu::Buffer,
     model_mat4_buffer: wgpu::Buffer,
 
@@ -1065,6 +1359,9 @@ impl Engine {
 
             // this is setting up the viewport basically
             let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+            let ar = 800.0 / 600.0;
+            let proj = Mat4::orthographic_lh(-ar, ar, -1.0, 1.0, -1.0, 1.0);
+            // let proj = Mat4::IDENTITY;
             let model = quad.transform.position * quad.transform.rotation * quad.transform.scale;
 
             let new_model = proj * model;
