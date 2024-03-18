@@ -42,14 +42,25 @@ impl Framework {
 
         let egui_ctx = Context::default();
         let viewport_id = Context::viewport_id(&egui_ctx);
-        let egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, Some(scale_factor), Some(max_texture_size));
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            viewport_id,
+            &window,
+            Some(scale_factor),
+            Some(max_texture_size),
+        );
         // egui_state.set_max_texture_side(max_texture_size);
         // egui_state.set_pixels_per_point(scale_factor);
         let screen_descriptor = ScreenDescriptor {
             size_in_pixels: [width, height],
             pixels_per_point: scale_factor,
         };
-        let renderer = Renderer::new(&app_context.device, app_context.render_texture_format, None, 1);
+        let renderer = Renderer::new(
+            &app_context.device,
+            app_context.render_texture_format,
+            None,
+            1,
+        );
         let textures = TexturesDelta::default();
         let gui = Gui::new();
 
@@ -61,7 +72,7 @@ impl Framework {
             paint_jobs: Vec::new(),
             textures,
             gui,
-            window
+            window,
         }
     }
 
@@ -95,7 +106,9 @@ impl Framework {
         self.textures.append(output.textures_delta);
         self.egui_state
             .handle_platform_output(&self.window, output.platform_output);
-        self.paint_jobs = self.egui_ctx.tessellate(output.shapes, output.pixels_per_point);
+        self.paint_jobs = self
+            .egui_ctx
+            .tessellate(output.shapes, output.pixels_per_point);
     }
 
     /// Render egui.

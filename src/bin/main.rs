@@ -27,8 +27,8 @@ impl<'a> Enemy<'a> {
         Self {
             x,
             y,
-            scale_x: 1.0,
-            scale_y: 1.0,
+            scale_x: 150.0,
+            scale_y: 150.0,
             color,
             label,
             health: 100.0,
@@ -199,52 +199,52 @@ impl Player {
         let scale = Vec3::new(self.scale_x, self.scale_y, 1.0);
         let line_scale = Vec3::new(10.0, 0.0, 1.0);
         let angle: f32 = FRAC_2_PI;
-        // let angle: f32 = FRAC_PI_2;
-        // let angle: f32 = 0.0;
+        //let angle: f32 = FRAC_PI_2;
+        //let angle: f32 = 0.0;
 
-        // engine.render_quad(position, scale, 0.0, color, Some(String::from("pika")));
-        engine.render_quad(position, scale, 0.0, color, None);
+        engine.render_quad(position, scale, angle, color, None);
 
-        // let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
-        // let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
-        let mut orig = Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0);
-        let mut dest = Vec3::new(200.0, 150.0, 0.0);
-        let line_color: [f32; 4] = [1.0, 1.0, 0.0, 0.1];
-
-        /////////////////////////////////
-        // for rotations. It's useful////
-        /////////////////////////////////
-        // let s = rotation.sin();
-        // let c = rotation.cos();
-        //
-        // orig.x -= self.x;
-        // orig.y -= self.y;
-        //
-        // let xnew = orig.x * c - orig.y * s;
-        // let ynew = orig.x * s + orig.y * c;
-        //
-        // orig.x = xnew + self.x;
-        // orig.y = ynew + self.y;
-        //
-        // dest.x -= self.x;
-        // dest.y -= self.y;
-        //
-        // let xnew = dest.x * c - dest.y * s;
-        // let ynew = dest.x * s + dest.y * c;
-        //
-        // dest.x = xnew + self.x;
-        // dest.y = ynew + self.y;
-        /////////////////////////////////
-        // for rotations. It's useful////
-        /////////////////////////////////
+        let mut orig = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
+        let mut dest = glam::Vec3::new(self.x + self.scale_x / 2.0, self.y, 0.0);
+        //let mut orig = Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0);
+        //let mut dest = Vec3::new(200.0, 150.0, 0.0);
+        let line_color: [f32; 4] = [1.0, 0.3, 0.7, 1.0];
 
         engine.render_line(orig, dest, line_color);
+        /////////////////////////////////
+        // for rotations. It's useful////
+        /////////////////////////////////
+        let s = angle.sin();
+        let c = angle.cos();
+
+        orig.x -= self.x;
+        orig.y -= self.y;
+
+        let xnew = orig.x * c - orig.y * s;
+        let ynew = orig.x * s + orig.y * c;
+
+        orig.x = xnew + self.x;
+        orig.y = ynew + self.y;
+
+        dest.x -= self.x;
+        dest.y -= self.y;
+
+        let xnew = dest.x * c - dest.y * s;
+        let ynew = dest.x * s + dest.y * c;
+
+        dest.x = xnew + self.x;
+        dest.y = ynew + self.y;
+        engine.render_line(orig, dest, [0.0, 1.0, 0.0, 1.0]);
+        /////////////////////////////////
+        // for rotations. It's useful////
+        /////////////////////////////////
+
         // TODO TAKE NOTES
         // render line is using a different projection. That means that positions of the objects needs to be bounded
-        // to the projection (which can be, ortho or persp). 
+        // to the projection (which can be, ortho or persp).
 
         // At least with the ortho projection it is possible to change where the coordinate (0, 0) will be located.
-        // 
+        //
         // If I use what Cherno used when I place an object at position (0, 0) its center will be at the middle of the screen.
         // let proj = Mat4::orthographic_lh(-ar, ar, -1.0, 1.0, -1.0, 1.0);
         // This is confirmed
@@ -252,13 +252,9 @@ impl Player {
         // If I then use what I've been using. The object's center will be at the bottom left of the screen.
         // LearnOpenGL uses the same convention as I, and I believe pretty much every other framework out there.
 
-
         // Conclusion, this has been good because I was able to understand a new concept. Regarding the implementation
         // I should stick to using what I have been using as it seems to be the defacto standard. At least for 2D frameworks.
         // TODO TAKE NOTES
-
-
-
 
         // let line_color2: [f32; 4] = [1.0, 0.0, 0.0, 0.1];
         // let mut origcopy = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
@@ -271,6 +267,30 @@ impl Player {
         // let dest = glam::Vec3::new(self.x, self.y - 100.0, 0.0);
         // let line_color: [f32; 4] = [1.0, 1.0, 0.0, 0.1];
         // engine.prepare_line_data(orig, dest, line_color)
+
+        // CIRCLE
+        let circle_position = vec3(100.0, 100.0, 0.0);
+        let circle_scale: Vec3 = vec3(700.0, 200.0, 0.0);
+        let circle_color: [f32; 4] = [1.0, 0.5, 0.3, 1.0];
+        let thickness = 1.00; // from 0.01 (nothing inside, almost 1px border) to 1.0 (full)
+        let fade = 0.009; // 0.0001 to 2.0, 0 being no fade. 0.009 makes it look smooth enough.
+        engine.render_circle(circle_position, circle_scale, thickness, fade, circle_color);
+
+        // EMPTY RECT
+        // la posicion representa el centro del rect. ver por que no me andaba antes y ahora si...
+        engine.render_rect(
+            vec3(500.0, 300.0, 0.0),
+            vec3(130.0, 130.0, 0.0),
+            0.0,
+            [1.0, 0.0, 0.0, 1.0],
+        );
+
+        engine.render_rect(
+            vec3(300.0, 300.0, 0.0),
+            vec3(130.0, 130.0, 0.0),
+            angle,
+            [1.0, 0.0, 0.0, 1.0],
+        );
     }
 }
 
@@ -286,7 +306,7 @@ impl<'a> App<'a> {
         App::create_enemies(&mut container);
 
         let player = Player {
-            x: 400.0,
+            x: 500.0,
             y: 300.0,
 
             amount_up: 0.0,
@@ -294,8 +314,8 @@ impl<'a> App<'a> {
             amount_left: 0.0,
             amount_right: 0.0,
 
-            scale_x: 10.0,
-            scale_y: 10.0,
+            scale_x: 130.0,
+            scale_y: 130.0,
             speed: 5.0,
         };
         Self { container, player }
@@ -304,12 +324,17 @@ impl<'a> App<'a> {
     fn create_enemies(container: &mut EnemyContainer) {
         let color1: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color2: [f32; 4] = [1.0, 0.0, 0.0, 0.3];
+        let circle_color: [f32; 4] = [1.0, 0.0, 0.0, 0.3];
+
         let enemy1 = Enemy::new(200.0, 300.0, color1, Some("Cube 1"), String::from("tree"));
         let enemy2 = Enemy::new(300.0, 200.0, color2, Some("Cube 2"), String::from("tree"));
-        let enemy_pika = Enemy::new(0.0, 0.0, color1, Some("Cube 2"), String::from("pika"));
+        let enemy_pika = Enemy::new(500.0, 500.0, color1, Some("Cube 2"), String::from("pika"));
+        // let circle_enemy = CircleEnemy::new(100.0, 100.0, circle_color);
+
         container.add_enemy(enemy1);
         container.add_enemy(enemy2);
         container.add_enemy(enemy_pika);
+        // container.add_enemy(circle_enemy);
     }
 }
 

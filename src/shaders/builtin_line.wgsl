@@ -32,7 +32,7 @@ var<uniform> model_mat4_second_vertex: mat4x4<f32>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return in.clip_position * color;
+    return color;
 }
 
 /*
