@@ -105,11 +105,13 @@ impl CirclePipeline {
                 wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: wgpu::VertexFormat::Float32x3,
-                    }],
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                    ],
                 }
             }
         }
@@ -170,7 +172,7 @@ impl CirclePipeline {
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: true,
@@ -351,7 +353,6 @@ impl CirclePipeline {
             circle_info: vec![],
             render_pipeline,
             vertex_buffer,
-
             model_mat4_buffer,
             color_buffer,
             thickness_buffer,
@@ -1380,6 +1381,7 @@ impl Engine {
             // this is setting up the viewport basically
             let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
             let ar = 800.0 / 600.0;
+
             //let proj = Mat4::orthographic_lh(-ar, ar, -1.0, 1.0, -1.0, 1.0);
             // let proj = Mat4::IDENTITY;
             let model = quad.transform.position * quad.transform.rotation * quad.transform.scale;
