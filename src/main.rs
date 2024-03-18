@@ -1,5 +1,5 @@
 #![allow(unused, dead_code)]
-use std::f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8};
+use std::{f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8}};
 
 use bm::async_runner;
 use glam::*;
@@ -27,8 +27,8 @@ impl<'a> Enemy<'a> {
         Self {
             x,
             y,
-            scale_x: 175.0,
-            scale_y: 175.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
             color,
             label,
             health: 100.0,
@@ -239,6 +239,26 @@ impl Player {
         /////////////////////////////////
 
         engine.render_line(orig, dest, line_color);
+        // TODO TAKE NOTES
+        // render line is using a different projection. That means that positions of the objects needs to be bounded
+        // to the projection (which can be, ortho or persp). 
+
+        // At least with the ortho projection it is possible to change where the coordinate (0, 0) will be located.
+        // 
+        // If I use what Cherno used when I place an object at position (0, 0) its center will be at the middle of the screen.
+        // let proj = Mat4::orthographic_lh(-ar, ar, -1.0, 1.0, -1.0, 1.0);
+        // This is confirmed
+
+        // If I then use what I've been using. The object's center will be at the bottom left of the screen.
+        // LearnOpenGL uses the same convention as I, and I believe pretty much every other framework out there.
+
+
+        // Conclusion, this has been good because I was able to understand a new concept. Regarding the implementation
+        // I should stick to using what I have been using as it seems to be the defacto standard. At least for 2D frameworks.
+        // TODO TAKE NOTES
+
+
+
 
         // let line_color2: [f32; 4] = [1.0, 0.0, 0.0, 0.1];
         // let mut origcopy = glam::Vec3::new(self.x - self.scale_x / 2.0, self.y, 0.0);
@@ -274,8 +294,8 @@ impl<'a> App<'a> {
             amount_left: 0.0,
             amount_right: 0.0,
 
-            scale_x: 120.0,
-            scale_y: 120.0,
+            scale_x: 10.0,
+            scale_y: 10.0,
             speed: 5.0,
         };
         Self { container, player }
@@ -286,7 +306,7 @@ impl<'a> App<'a> {
         let color2: [f32; 4] = [1.0, 0.0, 0.0, 0.3];
         let enemy1 = Enemy::new(200.0, 300.0, color1, Some("Cube 1"), String::from("tree"));
         let enemy2 = Enemy::new(300.0, 200.0, color2, Some("Cube 2"), String::from("tree"));
-        let enemy_pika = Enemy::new(500.0, 100.0, color1, Some("Cube 2"), String::from("pika"));
+        let enemy_pika = Enemy::new(0.0, 0.0, color1, Some("Cube 2"), String::from("pika"));
         container.add_enemy(enemy1);
         container.add_enemy(enemy2);
         container.add_enemy(enemy_pika);
