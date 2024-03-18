@@ -11,7 +11,6 @@ use wgpu::RenderPass;
 
 mod gui;
 
-
 use winit::event::KeyEvent;
 use winit::keyboard::KeyCode;
 
@@ -66,11 +65,10 @@ struct CircleInfo {
     // Radius is not needed because it is in the scale matrix. If scale is 1, then radius is 1.
 }
 
-
 // One pipeline for each type because they have different vertex and fragment shaders.
 struct CirclePipeline {
     // Data to render
-    circle_info : Vec<CircleInfo>,
+    circle_info: Vec<CircleInfo>,
 
     // Pipeline
     render_pipeline: wgpu::RenderPipeline,
@@ -83,6 +81,15 @@ struct CirclePipeline {
     color_buffer: wgpu::Buffer,
     thickness_buffer: wgpu::Buffer,
     fade_buffer: wgpu::Buffer,
+
+    // Uniform alignments
+    transform_uniform_alignment: wgpu::BufferAddress,
+    color_uniform_alignment: wgpu::BufferAddress,
+    thickness_uniform_alignment: wgpu::BufferAddress,
+    fade_uniform_alignment: wgpu::BufferAddress,
+
+    // Bindgroups
+    circle_bind_group: wgpu::BindGroup,
 }
 
 impl CirclePipeline {
@@ -98,13 +105,11 @@ impl CirclePipeline {
                 wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x3,
-                        },
-                    ],
+                    attributes: &[wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    }],
                 }
             }
         }
@@ -132,7 +137,6 @@ impl CirclePipeline {
             // Position of quad at the center
         ];
 
-
         let vertex_buffer =
             app_context
                 .device
@@ -141,7 +145,6 @@ impl CirclePipeline {
                     contents: bytemuck::cast_slice(VERTICES),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-
 
         // This `transform_uniform_size` has the same name in all other parts but it should be something related to MAT4
         let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
@@ -157,7 +160,7 @@ impl CirclePipeline {
                     entries: &[
                         wgpu::BindGroupLayoutEntry {
                             binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: true,
@@ -167,7 +170,7 @@ impl CirclePipeline {
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: true,
@@ -198,8 +201,6 @@ impl CirclePipeline {
                     ],
                 });
 
-
-
         // BUFFER CREATION
 
         // alignments
@@ -212,6 +213,14 @@ impl CirclePipeline {
             align_to(transform_uniform_size, alignment)
         };
 
+        let color_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(color_uniform_size, alignment)
+        };
 
         let thickness_uniform_alignment = {
             let alignment = app_context
@@ -240,7 +249,7 @@ impl CirclePipeline {
             mapped_at_creation: false,
         });
 
-        // Color doesn't use alignment because I'm initializing it with WHITE.
+        // Color doesn't use alignment because I'm initializing it with 40 WHITEs.
         let color_slice: [f32; 400] = [1.0; 400];
         let color_buffer = app_context
             .device
@@ -259,11 +268,10 @@ impl CirclePipeline {
 
         let fade_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Circle - Fade Buffer"),
-            size: 40 * thickness_uniform_alignment,
+            size: 40 * fade_uniform_alignment,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
 
         let bind_group = app_context
             .device
@@ -276,7 +284,7 @@ impl CirclePipeline {
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: &model_mat4_buffer,
                             offset: 0,
-                            size: wgpu::BufferSize::new(color_uniform_size),
+                            size: wgpu::BufferSize::new(transform_uniform_size),
                         }),
                     },
                     wgpu::BindGroupEntry {
@@ -284,7 +292,7 @@ impl CirclePipeline {
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: &color_buffer,
                             offset: 0,
-                            size: wgpu::BufferSize::new(transform_uniform_size),
+                            size: wgpu::BufferSize::new(color_uniform_size),
                         }),
                     },
                     wgpu::BindGroupEntry {
@@ -306,9 +314,8 @@ impl CirclePipeline {
                 ],
             });
 
-
         let module = wgpu::ShaderModuleDescriptor {
-            label: Some("Builtin Circle Shader"),
+            label: Some("Circle - Builtin Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/builtin_circle.wgsl").into()),
         };
 
@@ -316,29 +323,49 @@ impl CirclePipeline {
             .add_vertex_buffer_layout::<Vertex>()
             .add_color_target_state(wgpu::ColorTargetState {
                 format: app_context.config.format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent::REPLACE,
+                }),
                 write_mask: wgpu::ColorWrites::ALL,
             })
             .shader(module)
             // .with_wireframe(true)
             .pipeline_layout_descriptor(
-                "Vertex layout descriptor",
+                "Circle - Vertex layout descriptor",
                 &[&bind_group_layout],
                 &[],
             )
-            .build(&app_context.device, "Vertex Pipeline", "vs_main", "fs_main");
+            .build(
+                &app_context.device,
+                "Circle - Render Pipeline",
+                "vs_main",
+                "fs_main",
+            );
 
         Self {
             circle_info: vec![],
             render_pipeline,
             vertex_buffer,
+
             model_mat4_buffer,
             color_buffer,
             thickness_buffer,
             fade_buffer,
+
+            transform_uniform_alignment,
+            color_uniform_alignment,
+            thickness_uniform_alignment,
+            fade_uniform_alignment,
+
+            circle_bind_group: bind_group,
         }
     }
 }
-
 
 // START LINE
 // LINE
@@ -947,7 +974,12 @@ impl QuadPipeline {
                 &[&texture_bind_group_layout, &bind_group_layout],
                 &[],
             )
-            .build(&app_context.device, "Vertex Pipeline", "vs_main", "fs_main");
+            .build(
+                &app_context.device,
+                "Quad - Render Pipeline",
+                "vs_main",
+                "fs_main",
+            );
 
         Self {
             quad_info: vec![],
@@ -985,6 +1017,7 @@ pub struct Engine {
     pub texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
     quad_pipeline: QuadPipeline,
     line_pipeline: LinePipeline,
+    circle_pipeline: CirclePipeline,
 }
 
 impl Engine {
@@ -994,12 +1027,14 @@ impl Engine {
     ) -> Self {
         let quad_pipeline = QuadPipeline::new(app_context.clone());
         let line_pipeline = LinePipeline::new(app_context.clone());
+        let circle_pipeline = CirclePipeline::new(app_context.clone());
 
         Self {
             app_context: app_context.clone(),
             texture_map,
             quad_pipeline,
             line_pipeline,
+            circle_pipeline,
         }
     }
 
@@ -1104,8 +1139,6 @@ impl Engine {
                     bind_group,
                 },
             );
-
-
         }
     }
 
@@ -1280,7 +1313,6 @@ impl Engine {
         }
     }
 
-  
     pub fn begin_render<'rpass, 'a: 'rpass>(
         &'rpass self,
         encoder: &'a mut wgpu::CommandEncoder,
@@ -1360,7 +1392,7 @@ impl Engine {
             // this is setting up the viewport basically
             let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
             let ar = 800.0 / 600.0;
-            let proj = Mat4::orthographic_lh(-ar, ar, -1.0, 1.0, -1.0, 1.0);
+            //let proj = Mat4::orthographic_lh(-ar, ar, -1.0, 1.0, -1.0, 1.0);
             // let proj = Mat4::IDENTITY;
             let model = quad.transform.position * quad.transform.rotation * quad.transform.scale;
 
@@ -1428,50 +1460,6 @@ impl Engine {
         }
     }
 
-    fn render_lines<'pass>(
-        &'pass self,
-        render_pass: &mut RenderPass<'pass>,
-        device: &wgpu::Device,
-    ) {
-        render_pass.set_pipeline(&self.line_pipeline.render_pipeline);
-
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let color_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-        // dbg!(color_uniform_size); // 16
-        // dbg!(color_uniform_alignment); // 256
-
-        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let transform_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(transform_uniform_size, alignment)
-        };
-        // dbg!(transform_uniform_size); // 192
-        // dbg!(transform_uniform_alignment); // 256
-        // dbg!(std::mem::size_of::<Mat4>()); // 64
-        // dbg!(std::mem::size_of::<TransformComponent>()); // 256
-
-        for (i, _line) in self.line_pipeline.line_info.iter().enumerate() {
-            render_pass.set_bind_group(
-                0,
-                &self.line_pipeline.line_bind_group,
-                &[
-                    ((i + 1) * color_uniform_alignment as usize) as u32,
-                    ((i + 1) * transform_uniform_alignment as usize) as u32,
-                    ((i + 1) * transform_uniform_alignment as usize) as u32,
-                ],
-            );
-            render_pass.set_vertex_buffer(0, self.line_pipeline.vertex_buffer.slice(..));
-            render_pass.draw(0..2, 0..1);
-        }
-    }
-
     pub fn render_line(&mut self, orig: Vec3, dest: Vec3, color: [f32; 4]) {
         self.line_pipeline.line_info.push(LineInfo {
             color,
@@ -1526,6 +1514,191 @@ impl Engine {
                 transform_uniform_offset as wgpu::BufferAddress,
                 bytemuck::cast_slice(&new_model.to_cols_array_2d()),
             );
+        }
+    }
+
+    fn render_lines<'pass>(
+        &'pass self,
+        render_pass: &mut RenderPass<'pass>,
+        device: &wgpu::Device,
+    ) {
+        render_pass.set_pipeline(&self.line_pipeline.render_pipeline);
+
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let color_uniform_alignment = {
+            let alignment =
+                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+            align_to(color_uniform_size, alignment)
+        };
+        // dbg!(color_uniform_size); // 16
+        // dbg!(color_uniform_alignment); // 256
+
+        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let transform_uniform_alignment = {
+            let alignment =
+                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+            align_to(transform_uniform_size, alignment)
+        };
+        // dbg!(transform_uniform_size); // 192
+        // dbg!(transform_uniform_alignment); // 256
+        // dbg!(std::mem::size_of::<Mat4>()); // 64
+        // dbg!(std::mem::size_of::<TransformComponent>()); // 256
+
+        for (i, _line) in self.line_pipeline.line_info.iter().enumerate() {
+            render_pass.set_bind_group(
+                0,
+                &self.line_pipeline.line_bind_group,
+                &[
+                    ((i + 1) * color_uniform_alignment as usize) as u32,
+                    ((i + 1) * transform_uniform_alignment as usize) as u32,
+                    ((i + 1) * transform_uniform_alignment as usize) as u32,
+                ],
+            );
+            render_pass.set_vertex_buffer(0, self.line_pipeline.vertex_buffer.slice(..));
+            render_pass.draw(0..2, 0..1);
+        }
+    }
+
+    fn rotate_point(cx: f32, cy: f32, angle: f32, mut pos: Vec3) -> Vec3 {
+        let s = angle.sin();
+        let c = angle.cos();
+
+        pos.x -= cx;
+        pos.y -= cy;
+
+        let xnew = pos.x * c - pos.y * s;
+        let ynew = pos.x * s + pos.y * c;
+
+        pos.x = xnew + cx;
+        pos.y = ynew + cy;
+        return pos;
+    }
+    pub fn render_rect(&mut self, position: Vec3, size: Vec3, angle: f32, color: [f32; 4]) {
+        let fcx = position.x + size.x / 2.0;
+        let fcy = position.y - size.y / 2.0;
+        println!("FIRST {} {}", fcx, fcy);
+        //let p0 = Self::rotate_point(cx, cy, angle, position);
+        //let p1 = Self::rotate_point(cx, cy, angle, vec3(p0.x + size.x, p0.y, p0.z));
+        //let p2 = Self::rotate_point(cx, cy, angle, vec3(p1.x, p1.y - size.y, p0.z));
+        //let p3 = Self::rotate_point(cx, cy, angle, vec3(p0.x, p2.y, p1.z));
+
+        // Calculate the center of the rectangle
+        let cx = position.x;
+        let cy = position.y;
+
+        println!("SECOND {} {}", cx, cy);
+        // Calculate the half-width and half-height of the rectangle
+        let half_width = size.x / 2.0;
+        let half_height = size.y / 2.0;
+
+        // Calculate the rotated points of the rectangle
+        #[rustfmt::skip]
+        let p0 = Self::rotate_point(
+            cx, cy, angle, vec3(position.x - half_width, position.y + half_height, position.z)
+        );
+        #[rustfmt::skip]
+        let p1 = Self::rotate_point(
+            cx, cy, angle, vec3(position.x + half_width, position.y + half_height, position.z)
+        );
+        #[rustfmt::skip]
+        let p2 = Self::rotate_point(
+            cx, cy, angle, vec3(position.x + half_width, position.y - half_height, position.z)
+        );
+        #[rustfmt::skip]
+        let p3 = Self::rotate_point(
+            cx, cy, angle, vec3(position.x - half_width, position.y - half_height, position.z)
+        );
+
+        self.render_line(p0, p1, color);
+        self.render_line(p1, p2, color);
+        self.render_line(p2, p3, color);
+        self.render_line(p3, p0, color);
+    }
+
+    pub fn render_circle(
+        &mut self,
+        position: Vec3,
+        scale: Vec3,
+        thickness: f32,
+        fade: f32,
+        color: [f32; 4],
+    ) {
+        self.circle_pipeline.circle_info.push(CircleInfo {
+            transform: TransformComponent {
+                position: Mat4::from_translation(position),
+                scale: Mat4::from_scale(scale),
+                rotation: Mat4::IDENTITY,
+            },
+            thickness,
+            fade,
+            color,
+        });
+    }
+
+    pub fn update_circle_data(&mut self, device: &wgpu::Device) {
+        for (i, circle) in self.circle_pipeline.circle_info.iter_mut().enumerate() {
+            let transform_uniform_offset =
+                ((i + 1) * self.circle_pipeline.transform_uniform_alignment as usize) as u32;
+            let color_uniform_offset =
+                ((i + 1) * self.circle_pipeline.color_uniform_alignment as usize) as u32;
+            let thickness_uniform_offset =
+                ((i + 1) * self.circle_pipeline.thickness_uniform_alignment as usize) as u32;
+            let fade_uniform_offset =
+                ((i + 1) * self.circle_pipeline.fade_uniform_alignment as usize) as u32;
+
+            self.app_context.queue.write_buffer(
+                &self.circle_pipeline.color_buffer,
+                color_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&circle.color),
+            );
+
+            self.app_context.queue.write_buffer(
+                &self.circle_pipeline.thickness_buffer,
+                thickness_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&[circle.thickness]),
+            );
+
+            self.app_context.queue.write_buffer(
+                &self.circle_pipeline.fade_buffer,
+                fade_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&[circle.fade]),
+            );
+
+            let _view = Mat4::IDENTITY;
+            let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+            let model =
+                circle.transform.position * circle.transform.rotation * circle.transform.scale;
+            let new_model = proj * model;
+
+            self.app_context.queue.write_buffer(
+                &self.circle_pipeline.model_mat4_buffer,
+                transform_uniform_offset as wgpu::BufferAddress,
+                bytemuck::cast_slice(&new_model.to_cols_array_2d()),
+            );
+        }
+    }
+
+    fn render_circles<'pass>(
+        &'pass self,
+        render_pass: &mut RenderPass<'pass>,
+        device: &wgpu::Device,
+    ) {
+        render_pass.set_pipeline(&self.circle_pipeline.render_pipeline);
+        for (i, _circle) in self.circle_pipeline.circle_info.iter().enumerate() {
+            render_pass.set_bind_group(
+                0,
+                &self.circle_pipeline.circle_bind_group,
+                &[
+                    ((i + 1) * self.circle_pipeline.transform_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.circle_pipeline.color_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.circle_pipeline.thickness_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.circle_pipeline.fade_uniform_alignment as usize) as u32,
+                ],
+            );
+            render_pass.set_vertex_buffer(0, self.circle_pipeline.vertex_buffer.slice(..));
+            render_pass.draw(0..6, 0..1);
         }
     }
 }
@@ -1592,11 +1765,10 @@ pub async fn async_runner(mut app: impl Application + 'static) {
         }
     }
 
-
     // engine.create_magenta_texture(String::from("1px-magenta"), bytemuck::cast_slice(&pixels));
-    println!("{:?}", &pixels);
+    //println!("{:?}", &pixels);
     let xd: &[u8] = bytemuck::cast_slice(&pixels);
-    println!("{:?}", xd);
+    //println!("{:?}", xd);
     engine.create_dummy_texture_u32(String::from("1px-white"), bytemuck::cast_slice(&pixels));
 
     // engine.create_texture(id, texture_path)
@@ -1608,7 +1780,6 @@ pub async fn async_runner(mut app: impl Application + 'static) {
         app_context.clone(),
     );
 
-
     app.on_setup(&mut engine);
     let _ = event_loop.run(move |event, _event_loop| match event {
         Event::WindowEvent {
@@ -1617,99 +1788,98 @@ pub async fn async_runner(mut app: impl Application + 'static) {
         } => {
             framework.handle_event(&event);
             match event {
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(KeyCode::KeyQ),
-                        ..
-                    },
-                ..
-            } => {
-                dbg!("Received closed event");
-                panic!("Closed");
-            }
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
+                WindowEvent::KeyboardInput {
+                    event:
+                        KeyEvent {
+                            physical_key: PhysicalKey::Code(KeyCode::KeyQ),
+                            ..
+                        },
+                    ..
+                } => {
+                    dbg!("Received closed event");
+                    panic!("Closed");
+                }
+                WindowEvent::KeyboardInput {
+                    event:
+                        KeyEvent {
+                            state,
+                            physical_key,
+                            ..
+                        },
+                    ..
+                } => {
+                    let new_event = MyEvent::KeyboardInput {
                         state,
                         physical_key,
-                        ..
-                    },
-                ..
-            } => {
-                let new_event = MyEvent::KeyboardInput {
-                    state,
-                    physical_key,
-                };
+                    };
 
-                dbg!(new_event);
+                    dbg!(new_event);
 
-                app.on_event(&mut engine, new_event);
-            }
+                    app.on_event(&mut engine, new_event);
+                }
 
-            WindowEvent::RedrawRequested => {
-                framework.prepare();
-                app.on_update(&mut engine);
+                WindowEvent::RedrawRequested => {
+                    framework.prepare();
+                    app.on_update(&mut engine);
 
-                app.on_render(&mut engine);
-                // IMPORTANT:
-                // I can't store a renderpass because it needs a reference to a view and the view will
-                // change upon resizing
-                let frame = app_context
-                    .surface
-                    .get_current_texture()
-                    .or_else(|_| {
-                        app_context.reconfigure_surface();
-                        app_context.surface.get_current_texture()
-                    })
-                    .unwrap();
+                    app.on_render(&mut engine);
+                    // IMPORTANT:
+                    // I can't store a renderpass because it needs a reference to a view and the view will
+                    // change upon resizing
+                    let frame = app_context
+                        .surface
+                        .get_current_texture()
+                        .or_else(|_| {
+                            app_context.reconfigure_surface();
+                            app_context.surface.get_current_texture()
+                        })
+                        .unwrap();
 
-                let view = frame
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                    let view = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
 
-                let mut encoder =
-                    app_context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    let mut encoder = app_context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
                             label: Some("pixels_command_encoder"),
-                        });
+                        },
+                    );
 
+                    /////////////////////////////////////////////////
+                    ////////////////// RENDERING ////////////////////
+                    /////////////////////////////////////////////////
 
-                /////////////////////////////////////////////////
-                ////////////////// RENDERING ////////////////////
-                /////////////////////////////////////////////////
-              
-                engine.update_quad_data(&app_context.device);
-                engine.update_line_data(&app_context.device);
-                let texture_map = texture_map.lock().unwrap();
-                {
-                    let mut rpass = engine.begin_render(&mut encoder, &view);
-                    engine.render_quads(&texture_map, &mut rpass, &app_context.device);
-                    engine.render_lines(&mut rpass, &app_context.device);
+                    engine.update_quad_data(&app_context.device);
+                    engine.update_line_data(&app_context.device);
+                    engine.update_circle_data(&app_context.device);
+                    let texture_map = texture_map.lock().unwrap();
+                    {
+                        let mut rpass = engine.begin_render(&mut encoder, &view);
+                        engine.render_quads(&texture_map, &mut rpass, &app_context.device);
+                        engine.render_lines(&mut rpass, &app_context.device);
+                        engine.render_circles(&mut rpass, &app_context.device);
+                    }
+
+                    {
+                        framework.render(&mut encoder, &view, &app_context);
+                    }
+                    /////////////////////////////////////////////////
+                    ////////////////// RENDERING ////////////////////
+                    /////////////////////////////////////////////////
+
+                    engine.quad_pipeline.quad_info.clear();
+                    engine.line_pipeline.line_info.clear();
+                    engine.circle_pipeline.circle_info.clear();
+
+                    app_context.queue.submit(Some(encoder.finish()));
+                    frame.present();
+
+                    main_window.request_redraw();
                 }
 
-                {
-
-                    framework.render(&mut encoder, &view, &app_context);
-                }
-                /////////////////////////////////////////////////
-                ////////////////// RENDERING ////////////////////
-                /////////////////////////////////////////////////
-
-
-                engine.quad_pipeline.quad_info.clear();
-                engine.line_pipeline.line_info.clear();
-
-                app_context.queue.submit(Some(encoder.finish()));
-                frame.present();
-
-                main_window.request_redraw();
+                _ => (),
             }
-
-            _ => (),
         }
-    }
         Event::DeviceEvent {
             event: DeviceEvent::MouseMotion { delta: _ },
             ..
