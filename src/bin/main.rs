@@ -1,5 +1,5 @@
 #![allow(unused, dead_code)]
-use std::{f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8}};
+use std::f32::consts::{FRAC_2_PI, FRAC_PI_2, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8};
 
 use bm::async_runner;
 use glam::*;
