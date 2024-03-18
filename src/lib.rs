@@ -389,6 +389,12 @@ struct LinePipeline {
     color_buffer: wgpu::Buffer,
     orig_model_mat4_buffer: wgpu::Buffer,
     dest_model_mat4_buffer: wgpu::Buffer,
+
+    // Uniforms alignments
+    color_uniform_alignment: wgpu::BufferAddress,
+    transform_uniform_alignment: wgpu::BufferAddress,
+
+    // Bindgroups
     line_bind_group: wgpu::BindGroup,
 }
 
@@ -485,6 +491,17 @@ impl LinePipeline {
             align_to(transform_uniform_size, alignment)
         };
 
+        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
+        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
+        let color_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(color_uniform_size, alignment)
+        };
+
         let orig_model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("line MVP Buffer"),
             size: 40 * transform_uniform_alignment,
@@ -499,18 +516,6 @@ impl LinePipeline {
             mapped_at_creation: false,
         });
 
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let color_uniform_alignment = {
-            let alignment = app_context
-                .device
-                .limits()
-                .min_uniform_buffer_offset_alignment
-                as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-
-        let color_slice: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         let color_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Line Color Buffer"),
             size: 40 * color_uniform_alignment,
@@ -587,6 +592,8 @@ impl LinePipeline {
             color_buffer,
             orig_model_mat4_buffer,
             dest_model_mat4_buffer,
+            color_uniform_alignment,
+            transform_uniform_alignment,
             line_bind_group,
         }
     }
@@ -612,6 +619,10 @@ struct QuadPipeline {
     // Uniforms
     color_buffer: wgpu::Buffer,
     model_mat4_buffer: wgpu::Buffer,
+
+    // Uniform alignments
+    transform_uniform_alignment: wgpu::BufferAddress,
+    color_uniform_alignment: wgpu::BufferAddress,
 
     // This `wgpu::BindGroup`` holds uniform data for the quad that can change every frame
     bind_group: wgpu::BindGroup,
@@ -854,13 +865,6 @@ impl QuadPipeline {
             align_to(transform_uniform_size, alignment)
         };
 
-        let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("translation Buffer"),
-            size: 40 * transform_uniform_alignment,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
         // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
         let color_uniform_alignment = {
@@ -871,6 +875,13 @@ impl QuadPipeline {
                 as wgpu::BufferAddress;
             align_to(color_uniform_size, alignment)
         };
+
+        let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("translation Buffer"),
+            size: 40 * transform_uniform_alignment,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         ////////////////////////////////////////
         /////////////// QUAD ///////////////////
@@ -985,13 +996,16 @@ impl QuadPipeline {
             quad_info: vec![],
             render_pipeline,
             vertex_buffer,
+
             color_buffer,
             model_mat4_buffer,
 
-            // uniforms
+            color_uniform_alignment,
+            transform_uniform_alignment,
+
             bind_group,
 
-            // textures
+            // textures bindgroup layout
             texture_bind_group_layout,
         }
     }
@@ -1014,7 +1028,7 @@ struct BindableTexture {
 
 pub struct Engine {
     app_context: Arc<AppContext>,
-    pub texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
+    texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
     quad_pipeline: QuadPipeline,
     line_pipeline: LinePipeline,
     circle_pipeline: CirclePipeline,
@@ -1041,9 +1055,7 @@ impl Engine {
     pub fn create_dummy_texture_u32(&self, id: String, data: &[u8]) {
         let mut texture_map = self.texture_map.lock().unwrap();
 
-        if !texture_map.contains_key(&id) {
-            use image::GenericImageView;
-
+        texture_map.entry(id.clone()).or_insert_with(|| {
             let format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
             let pixel_size = match format.block_dimensions() {
@@ -1082,7 +1094,7 @@ impl Engine {
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                 },
-                &data,
+                data,
                 wgpu::ImageDataLayout {
                     offset: 0,
                     // bytes_per_row: Some(4 * dimensions.0),
@@ -1132,21 +1144,16 @@ impl Engine {
                         ],
                     });
 
-            texture_map.insert(
-                id,
-                BindableTexture {
-                    texture,
-                    bind_group,
-                },
-            );
-        }
+            BindableTexture {
+                texture,
+                bind_group,
+            }
+        });
     }
 
     pub fn create_dummy_texture(&self, id: String, data: &[u8]) {
         let mut texture_map = self.texture_map.lock().unwrap();
-        if !texture_map.contains_key(&id) {
-            use image::GenericImageView;
-
+        texture_map.entry(id.clone()).or_insert_with(|| {
             let format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
             let pixel_size = match format.block_dimensions() {
@@ -1189,7 +1196,7 @@ impl Engine {
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                 },
-                &data,
+                data,
                 wgpu::ImageDataLayout {
                     offset: 0,
                     // bytes_per_row: Some(4 * dimensions.0),
@@ -1239,19 +1246,16 @@ impl Engine {
                         ],
                     });
 
-            texture_map.insert(
-                id,
-                BindableTexture {
-                    texture,
-                    bind_group,
-                },
-            );
-        }
+            BindableTexture {
+                texture,
+                bind_group,
+            }
+        });
     }
 
     pub fn create_texture(&self, id: String, texture_path: &str) {
         let mut texture_map = self.texture_map.lock().unwrap();
-        if !texture_map.contains_key(&id) {
+        texture_map.entry(id.clone()).or_insert_with(|| {
             let bytes = std::fs::read(texture_path).unwrap();
             let texture = Texture::from_bytes(
                 &self.app_context.device,
@@ -1303,14 +1307,12 @@ impl Engine {
                             },
                         ],
                     });
-            texture_map.insert(
-                id,
-                BindableTexture {
-                    texture,
-                    bind_group,
-                },
-            );
-        }
+
+            BindableTexture {
+                texture,
+                bind_group,
+            }
+        });
     }
 
     pub fn begin_render<'rpass, 'a: 'rpass>(
@@ -1359,26 +1361,12 @@ impl Engine {
     }
 
     pub fn update_quad_data(&mut self, device: &wgpu::Device) {
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        // take it from a struct as its always the same for quads
-        let color_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
-        let transform_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(transform_uniform_size, alignment)
-        };
-
-        // println!("COLOR UNIFORM ALIGNMENT {:?}", color_uniform_alignment);
-        // println!("TRANSFORM UNIFORM ALIGNMENT {:?}", transform_uniform_alignment);
-
         for (i, quad) in self.quad_pipeline.quad_info.iter_mut().enumerate() {
-            let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
-            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
+            let color_uniform_offset =
+                ((i + 1) * self.quad_pipeline.color_uniform_alignment as usize) as u32;
+            let transform_uniform_offset =
+                ((i + 1) * self.quad_pipeline.transform_uniform_alignment as usize) as u32;
+
             self.app_context.queue.write_buffer(
                 &self.quad_pipeline.color_buffer,
                 color_uniform_offset as wgpu::BufferAddress,
@@ -1409,50 +1397,27 @@ impl Engine {
         &'pass self,
         texture_map: &'pass TextureMap,
         render_pass: &mut RenderPass<'pass>,
-        device: &wgpu::Device,
     ) {
         render_pass.set_pipeline(&self.quad_pipeline.render_pipeline);
-
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let color_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-        // dbg!(color_uniform_size); // 16
-        // dbg!(color_uniform_alignment); // 256
-
-        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let transform_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(transform_uniform_size, alignment)
-        };
-        // dbg!(transform_uniform_size); // 192
-        // dbg!(transform_uniform_alignment); // 256
-        // dbg!(std::mem::size_of::<Mat4>()); // 64
-        // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, quad) in self.quad_pipeline.quad_info.iter().enumerate() {
             let bind_group: &wgpu::BindGroup;
 
             if let Some(id) = &quad.texture_name {
                 bind_group = &texture_map.get(id).unwrap().bind_group;
-                render_pass.set_bind_group(0, &bind_group, &[]);
+                render_pass.set_bind_group(0, bind_group, &[]);
             } else {
                 bind_group = &texture_map.get("1px-white").unwrap().bind_group;
-                render_pass.set_bind_group(0, &bind_group, &[]);
+                render_pass.set_bind_group(0, bind_group, &[]);
             }
 
-            render_pass.set_bind_group(0, &bind_group, &[]);
+            render_pass.set_bind_group(0, bind_group, &[]);
             render_pass.set_bind_group(
                 1,
                 &self.quad_pipeline.bind_group,
                 &[
-                    ((i + 1) * color_uniform_alignment as usize) as u32,
-                    ((i + 1) * transform_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.quad_pipeline.color_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.quad_pipeline.transform_uniform_alignment as usize) as u32,
                 ],
             );
             render_pass.set_vertex_buffer(0, self.quad_pipeline.vertex_buffer.slice(..));
@@ -1471,21 +1436,12 @@ impl Engine {
     }
 
     pub fn update_line_data(&mut self, device: &wgpu::Device) {
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        let color_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
-        let transform_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(transform_uniform_size, alignment)
-        };
-
         for (i, line) in self.line_pipeline.line_info.iter_mut().enumerate() {
-            let color_uniform_offset = ((i + 1) * color_uniform_alignment as usize) as u32;
+            let color_uniform_offset =
+                ((i + 1) * self.line_pipeline.color_uniform_alignment as usize) as u32;
+            let transform_uniform_offset =
+                ((i + 1) * self.line_pipeline.transform_uniform_alignment as usize) as u32;
+
             self.app_context.queue.write_buffer(
                 &self.line_pipeline.color_buffer,
                 color_uniform_offset as wgpu::BufferAddress,
@@ -1500,7 +1456,6 @@ impl Engine {
             let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
 
             let new_model = proj * line.transform.orig;
-            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
             self.app_context.queue.write_buffer(
                 &self.line_pipeline.orig_model_mat4_buffer,
                 transform_uniform_offset as wgpu::BufferAddress,
@@ -1508,7 +1463,6 @@ impl Engine {
             );
 
             let new_model = proj * line.transform.dest;
-            let transform_uniform_offset = ((i + 1) * transform_uniform_alignment as usize) as u32;
             self.app_context.queue.write_buffer(
                 &self.line_pipeline.dest_model_mat4_buffer,
                 transform_uniform_offset as wgpu::BufferAddress,
@@ -1517,43 +1471,17 @@ impl Engine {
         }
     }
 
-    fn render_lines<'pass>(
-        &'pass self,
-        render_pass: &mut RenderPass<'pass>,
-        device: &wgpu::Device,
-    ) {
+    fn render_lines<'pass>(&'pass self, render_pass: &mut RenderPass<'pass>) {
         render_pass.set_pipeline(&self.line_pipeline.render_pipeline);
-
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let color_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-        // dbg!(color_uniform_size); // 16
-        // dbg!(color_uniform_alignment); // 256
-
-        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
-        // Make the `uniform_alignment` >= `entity_uniform_size` and aligned to `min_uniform_buffer_offset_alignment`.
-        let transform_uniform_alignment = {
-            let alignment =
-                device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
-            align_to(transform_uniform_size, alignment)
-        };
-        // dbg!(transform_uniform_size); // 192
-        // dbg!(transform_uniform_alignment); // 256
-        // dbg!(std::mem::size_of::<Mat4>()); // 64
-        // dbg!(std::mem::size_of::<TransformComponent>()); // 256
 
         for (i, _line) in self.line_pipeline.line_info.iter().enumerate() {
             render_pass.set_bind_group(
                 0,
                 &self.line_pipeline.line_bind_group,
                 &[
-                    ((i + 1) * color_uniform_alignment as usize) as u32,
-                    ((i + 1) * transform_uniform_alignment as usize) as u32,
-                    ((i + 1) * transform_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.line_pipeline.color_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.line_pipeline.transform_uniform_alignment as usize) as u32,
+                    ((i + 1) * self.line_pipeline.transform_uniform_alignment as usize) as u32,
                 ],
             );
             render_pass.set_vertex_buffer(0, self.line_pipeline.vertex_buffer.slice(..));
@@ -1573,7 +1501,7 @@ impl Engine {
 
         pos.x = xnew + cx;
         pos.y = ynew + cy;
-        return pos;
+        pos
     }
     pub fn render_rect(&mut self, position: Vec3, size: Vec3, angle: f32, color: [f32; 4]) {
         let fcx = position.x + size.x / 2.0;
@@ -1637,7 +1565,7 @@ impl Engine {
         });
     }
 
-    pub fn update_circle_data(&mut self, device: &wgpu::Device) {
+    pub fn update_circle_data(&mut self) {
         for (i, circle) in self.circle_pipeline.circle_info.iter_mut().enumerate() {
             let transform_uniform_offset =
                 ((i + 1) * self.circle_pipeline.transform_uniform_alignment as usize) as u32;
@@ -1680,11 +1608,7 @@ impl Engine {
         }
     }
 
-    fn render_circles<'pass>(
-        &'pass self,
-        render_pass: &mut RenderPass<'pass>,
-        device: &wgpu::Device,
-    ) {
+    fn render_circles<'pass>(&'pass self, render_pass: &mut RenderPass<'pass>) {
         render_pass.set_pipeline(&self.circle_pipeline.render_pipeline);
         for (i, _circle) in self.circle_pipeline.circle_info.iter().enumerate() {
             render_pass.set_bind_group(
@@ -1851,13 +1775,13 @@ pub async fn async_runner(mut app: impl Application + 'static) {
 
                     engine.update_quad_data(&app_context.device);
                     engine.update_line_data(&app_context.device);
-                    engine.update_circle_data(&app_context.device);
+                    engine.update_circle_data();
                     let texture_map = texture_map.lock().unwrap();
                     {
                         let mut rpass = engine.begin_render(&mut encoder, &view);
-                        engine.render_quads(&texture_map, &mut rpass, &app_context.device);
-                        engine.render_lines(&mut rpass, &app_context.device);
-                        engine.render_circles(&mut rpass, &app_context.device);
+                        engine.render_quads(&texture_map, &mut rpass);
+                        engine.render_lines(&mut rpass);
+                        engine.render_circles(&mut rpass);
                     }
 
                     {
