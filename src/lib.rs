@@ -1031,16 +1031,28 @@ use winit::monitor::{MonitorHandle, VideoMode};
 use winit::window::Fullscreen;
 
 struct Clock {
-    ellapsed_time: Instant,
+    previous_frame_instant: Instant,
     total_ellapsed_time: Duration,
     delta_time: Duration,
+    fps: u16,
 }
 
 impl Clock {
     pub fn tick(&mut self) {
-        self.delta_time = self.ellapsed_time.elapsed();
-        self.ellapsed_time = Instant::now();
+        self.delta_time = self.previous_frame_instant.elapsed();
+        self.previous_frame_instant = Instant::now();
         self.total_ellapsed_time += self.delta_time;
+        self.fps = (1000.0 / (self.delta_time.as_secs_f64() * 1000.0)) as u16;
+    }
+}
+
+impl std::fmt::Debug for Clock {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Clock")
+            .field("FPS: ", &self.fps)
+            .field("delta time: ", &self.delta_time)
+            .field("total ellapsed time: ", &self.total_ellapsed_time)
+            .finish()
     }
 }
 
@@ -1724,9 +1736,10 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     app.on_setup(&mut engine);
 
     let mut clock = Clock {
-        ellapsed_time: Instant::now(),
+        previous_frame_instant: Instant::now(),
         delta_time: Duration::default(),
         total_ellapsed_time: Duration::default(),
+        fps: 0,
     };
 
     let _ = event_loop.run(move |event, _event_loop| match event {
@@ -1770,14 +1783,8 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                     clock.tick();
                     framework.prepare();
                     app.on_update(&mut engine, clock.delta_time.as_secs_f32());
-                    println!(
-                        "CLOCK: \nelapsed: {:?}\ndt: {:?}\ntotal_time: {:.5?}\nFPS: {:?}",
-                        clock.ellapsed_time,
-                        clock.delta_time,
-                        clock.total_ellapsed_time.as_secs_f64(),
-                        1000.0 / (clock.delta_time.as_secs_f64() * 1000.0)
-                    );
-
+                    println!("{:?}", clock);
+                  
                     app.on_render(&mut engine);
                     // IMPORTANT:
                     // I can't store a renderpass because it needs a reference to a view and the view will
