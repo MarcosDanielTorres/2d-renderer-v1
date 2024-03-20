@@ -2,6 +2,7 @@ use glam::*;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt::{Debug, Formatter, Pointer, Write};
 use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -38,7 +39,7 @@ use wgpu::util::{align_to, BufferInitDescriptor, DeviceExt};
 
 pub trait Application {
     fn on_setup(&mut self, engine: &mut Engine);
-    fn on_update(&mut self, engine: &mut Engine);
+    fn on_update(&mut self, engine: &mut Engine, delta_time: f32);
     fn on_render(&mut self, engine: &mut Engine);
     fn on_event(&mut self, engine: &mut Engine, event: MyEvent);
 }
@@ -1025,6 +1026,24 @@ struct BindableTexture {
     bind_group: wgpu::BindGroup,
 }
 
+use std::time::{Duration, Instant};
+use winit::monitor::{MonitorHandle, VideoMode};
+use winit::window::Fullscreen;
+
+struct Clock {
+    ellapsed_time: Instant,
+    total_ellapsed_time: Duration,
+    delta_time: Duration,
+}
+
+impl Clock {
+    pub fn tick(&mut self) {
+        self.delta_time = self.ellapsed_time.elapsed();
+        self.ellapsed_time = Instant::now();
+        self.total_ellapsed_time += self.delta_time;
+    }
+}
+
 pub struct Engine {
     app_context: Arc<AppContext>,
     texture_map: Arc<Mutex<HashMap<String, BindableTexture>>>,
@@ -1506,7 +1525,6 @@ impl Engine {
     pub fn render_rect(&mut self, position: Vec3, size: Vec3, angle: f32, color: [f32; 4]) {
         let fcx = position.x + size.x / 2.0;
         let fcy = position.y - size.y / 2.0;
-        println!("FIRST {} {}", fcx, fcy);
         //let p0 = Self::rotate_point(cx, cy, angle, position);
         //let p1 = Self::rotate_point(cx, cy, angle, vec3(p0.x + size.x, p0.y, p0.z));
         //let p2 = Self::rotate_point(cx, cy, angle, vec3(p1.x, p1.y - size.y, p0.z));
@@ -1516,7 +1534,6 @@ impl Engine {
         let cx = position.x;
         let cy = position.y;
 
-        println!("SECOND {} {}", cx, cy);
         // Calculate the half-width and half-height of the rectangle
         let half_width = size.x / 2.0;
         let half_height = size.y / 2.0;
@@ -1642,7 +1659,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
     let main_window = Arc::new(
         WindowBuilder::new()
-            .with_inner_size(application_window_size2)
+            .with_fullscreen(Some(Fullscreen::Borderless(None)))
             .with_title("Game")
             .build(&event_loop)
             .unwrap(),
@@ -1705,6 +1722,13 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     );
 
     app.on_setup(&mut engine);
+
+    let mut clock = Clock {
+        ellapsed_time: Instant::now(),
+        delta_time: Duration::default(),
+        total_ellapsed_time: Duration::default(),
+    };
+
     let _ = event_loop.run(move |event, _event_loop| match event {
         Event::WindowEvent {
             window_id: _,
@@ -1743,8 +1767,16 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                 }
 
                 WindowEvent::RedrawRequested => {
+                    clock.tick();
                     framework.prepare();
-                    app.on_update(&mut engine);
+                    app.on_update(&mut engine, clock.delta_time.as_secs_f32());
+                    println!(
+                        "CLOCK: \nelapsed: {:?}\ndt: {:?}\ntotal_time: {:.5?}\nFPS: {:?}",
+                        clock.ellapsed_time,
+                        clock.delta_time,
+                        clock.total_ellapsed_time.as_secs_f64(),
+                        1000.0 / (clock.delta_time.as_secs_f64() * 1000.0)
+                    );
 
                     app.on_render(&mut engine);
                     // IMPORTANT:

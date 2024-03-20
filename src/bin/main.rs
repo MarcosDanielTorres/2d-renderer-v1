@@ -36,7 +36,7 @@ impl<'a> Enemy<'a> {
         }
     }
 
-    pub fn on_update(&mut self, engine: &mut bm::Engine, new_pos: (f32, f32)) {
+    pub fn on_update(&mut self, engine: &mut bm::Engine, new_pos: (f32, f32), delta_time: f32) {
         if let Some(val) = self.label {
             if val == "Enemy 1" {
                 // println!("Enemy 1: {:?}, {:?}", (self.x, self.y), self.health);
@@ -71,12 +71,12 @@ struct EnemyContainer<'a> {
 }
 
 impl<'a> EnemyContainer<'a> {
-    pub fn on_update(&mut self, engine: &mut bm::Engine, player: &Player) {
+    pub fn on_update(&mut self, engine: &mut bm::Engine, player: &Player, delta_time: f32) {
         for enemy in self.enemies.iter_mut() {
             if enemy.health < 0.0 {
                 continue;
             }
-            enemy.on_update(engine, (1.0, 1.0));
+            enemy.on_update(engine, (1.0, 1.0), delta_time);
 
             // check collisions
             let half_player_w = player.scale_x / 2.0;
@@ -101,8 +101,6 @@ impl<'a> EnemyContainer<'a> {
 
             if (left_player <= right_enemy && top_player >= bottom_enemy) {
                 // enemy.health -= 1.0;
-                println!("player: {} {}", player.x, player.y);
-                println!("enemy: {} {}", enemy.x, enemy.y);
             }
         }
     }
@@ -136,9 +134,7 @@ struct Player {
 }
 
 impl Player {
-    pub fn update(&mut self, engine: &mut bm::Engine) {
-        println!("player: {:?}", (self.x, self.y));
-        println!("amount_right: {:?}", self.amount_right);
+    pub fn update(&mut self, engine: &mut bm::Engine, delta_time: f32) {
         self.x += (self.amount_right + self.amount_left) * self.speed;
         self.y += (self.amount_up + self.amount_down) * self.speed;
     }
@@ -347,9 +343,9 @@ impl<'a> bm::Application for App<'a> {
         engine.create_texture(String::from("pumpkin"), "src/pumpkin.png");
     }
 
-    fn on_update(&mut self, engine: &mut bm::Engine) {
-        self.player.update(engine);
-        self.container.on_update(engine, &self.player);
+    fn on_update(&mut self, engine: &mut bm::Engine, delta_time: f32) {
+        self.player.update(engine, delta_time);
+        self.container.on_update(engine, &self.player, delta_time);
     }
 
     fn on_render(&mut self, engine: &mut bm::Engine) {
