@@ -1784,7 +1784,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                     framework.prepare();
                     app.on_update(&mut engine, clock.delta_time.as_secs_f32());
                     println!("{:?}", clock);
-
+                  
                     app.on_render(&mut engine);
                     // IMPORTANT:
                     // I can't store a renderpass because it needs a reference to a view and the view will
