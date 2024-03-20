@@ -1032,7 +1032,7 @@ use winit::window::Fullscreen;
 
 struct Clock {
     previous_frame_instant: Instant,
-    total_ellapsed_time: Duration,
+    total_elapsed_time: Duration,
     delta_time: Duration,
     fps: u16,
 }
@@ -1041,7 +1041,7 @@ impl Clock {
     pub fn tick(&mut self) {
         self.delta_time = self.previous_frame_instant.elapsed();
         self.previous_frame_instant = Instant::now();
-        self.total_ellapsed_time += self.delta_time;
+        self.total_elapsed_time += self.delta_time;
         self.fps = (1000.0 / (self.delta_time.as_secs_f64() * 1000.0)) as u16;
     }
 }
@@ -1051,7 +1051,7 @@ impl std::fmt::Debug for Clock {
         f.debug_struct("Clock")
             .field("FPS: ", &self.fps)
             .field("delta time: ", &self.delta_time)
-            .field("total ellapsed time: ", &self.total_ellapsed_time)
+            .field("total elapsed time: ", &self.total_elapsed_time)
             .finish()
     }
 }
@@ -1738,7 +1738,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     let mut clock = Clock {
         previous_frame_instant: Instant::now(),
         delta_time: Duration::default(),
-        total_ellapsed_time: Duration::default(),
+        total_elapsed_time: Duration::default(),
         fps: 0,
     };
 
