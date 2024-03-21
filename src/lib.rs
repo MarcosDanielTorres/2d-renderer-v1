@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
-use wgpu::RenderPass;
+use wgpu::{BindGroupLayoutEntry, RenderPass};
 
 mod gui;
 
@@ -39,7 +39,7 @@ use wgpu::util::{align_to, BufferInitDescriptor, DeviceExt};
 
 pub trait Application {
     fn on_setup(&mut self, engine: &mut Engine);
-    fn on_update(&mut self, engine: &mut Engine, delta_time: f32);
+    fn on_update(&mut self, engine: &mut Engine, delta_time: f32, time: f32);
     fn on_render(&mut self, engine: &mut Engine);
     fn on_event(&mut self, engine: &mut Engine, event: MyEvent);
 }
@@ -57,12 +57,26 @@ struct LineComponent {
 
 // START CIRCLE
 // CIRCLE
+const INDICESimp: &[u16] = &[
+    0, 1, 2, // First triangle (Top Right, Top Left, Bottom Left)
+    2, 3, 0, // Second triangle (Bottom Left, Bottom Right, Top Right)
+];
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CircleUniforms {
+    model: [[f32; 4]; 4],
+    color: [f32; 4],
+    thickness: f32,
+    fade: f32,
+}
 
 struct CircleInfo {
     transform: TransformComponent,
     color: [f32; 4],
     thickness: f32,
     fade: f32,
+    uniform_offset: wgpu::DynamicOffset,
     // Radius is not needed because it is in the scale matrix. If scale is 1, then radius is 1.
 }
 
@@ -76,18 +90,13 @@ struct CirclePipeline {
 
     // Vertex - same as quad. Because it is a quad modified in the fragment shader.
     vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
 
     // Uniforms
-    model_mat4_buffer: wgpu::Buffer,
-    color_buffer: wgpu::Buffer,
-    thickness_buffer: wgpu::Buffer,
-    fade_buffer: wgpu::Buffer,
+    circle_uniform_buffer: wgpu::Buffer,
 
     // Uniform alignments
-    transform_uniform_alignment: wgpu::BufferAddress,
-    color_uniform_alignment: wgpu::BufferAddress,
-    thickness_uniform_alignment: wgpu::BufferAddress,
-    fade_uniform_alignment: wgpu::BufferAddress,
+    circle_uniform_alignment: wgpu::BufferAddress,
 
     // Bindgroups
     circle_bind_group: wgpu::BindGroup,
@@ -138,181 +147,90 @@ impl CirclePipeline {
             // Position of quad at the center
         ];
 
+        const VERTICESimp: &[Vertex] = &[
+            Vertex {
+                position: [0.5, 0.5, 0.0],
+            }, // Top Right, index 0
+            Vertex {
+                position: [-0.5, 0.5, 0.0],
+            }, // Top Left, index 1
+            Vertex {
+                position: [-0.5, -0.5, 0.0],
+            }, // Bottom Left, index 2
+            Vertex {
+                position: [0.5, -0.5, 0.0],
+            }, // Bottom Right, index 3
+        ];
+
         let vertex_buffer =
             app_context
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Vertex Buffer"),
-                    contents: bytemuck::cast_slice(VERTICES),
+                    contents: bytemuck::cast_slice(VERTICESimp),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
-        // This `transform_uniform_size` has the same name in all other parts but it should be something related to MAT4
-        let transform_uniform_size = std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress;
-        let color_uniform_size = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-        let thickness_uniform_size = std::mem::size_of::<f32>() as wgpu::BufferAddress;
-        let fade_uniform_size = std::mem::size_of::<f32>() as wgpu::BufferAddress;
+        let index_buffer =
+            app_context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Index Buffer"),
+                    contents: bytemuck::cast_slice(INDICESimp),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
-        let bind_group_layout =
+        let circle_uniform_size = std::mem::size_of::<CircleUniforms>() as wgpu::BufferAddress;
+        let circle_uniform_alignment = {
+            let alignment = app_context
+                .device
+                .limits()
+                .min_uniform_buffer_offset_alignment
+                as wgpu::BufferAddress;
+            align_to(circle_uniform_size, alignment)
+        };
+        println!("size: {:?}", circle_uniform_size);
+        println!("alignment: {:?}", circle_uniform_alignment);
+
+        let circle_uniform_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 300000 * circle_uniform_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // TODO correlacionado con el alignment de mas abajo. Pero aca el size es diferente y tiene que ser el minimo que agarre a toda la struct
+        // por alguna razon tiene algunos bytes extras. La struct son 88 pero aca el minimo son 98
+        let circle_bind_group_layout =
             app_context
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("Circle - BindGroupLayout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(transform_uniform_size),
-                            },
-                            count: None,
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: wgpu::BufferSize::new(98),
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(color_uniform_size),
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(thickness_uniform_size),
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: wgpu::BufferSize::new(fade_uniform_size),
-                            },
-                            count: None,
-                        },
-                    ],
+                        count: None,
+                    }],
+                    label: None,
                 });
 
-        // BUFFER CREATION
-
-        // alignments
-        let transform_uniform_alignment = {
-            let alignment = app_context
-                .device
-                .limits()
-                .min_uniform_buffer_offset_alignment
-                as wgpu::BufferAddress;
-            align_to(transform_uniform_size, alignment)
-        };
-
-        let color_uniform_alignment = {
-            let alignment = app_context
-                .device
-                .limits()
-                .min_uniform_buffer_offset_alignment
-                as wgpu::BufferAddress;
-            align_to(color_uniform_size, alignment)
-        };
-
-        let thickness_uniform_alignment = {
-            let alignment = app_context
-                .device
-                .limits()
-                .min_uniform_buffer_offset_alignment
-                as wgpu::BufferAddress;
-            align_to(thickness_uniform_size, alignment)
-        };
-
-        // this `alignemnt` can be calculated once
-        let fade_uniform_alignment = {
-            let alignment = app_context
-                .device
-                .limits()
-                .min_uniform_buffer_offset_alignment
-                as wgpu::BufferAddress;
-            align_to(fade_uniform_size, alignment)
-        };
-
-        // buffers
-        let model_mat4_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Circle - MAT4 Buffer"),
-            size: 40 * transform_uniform_alignment,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Color doesn't use alignment because I'm initializing it with 40 WHITEs.
-        let color_slice: [f32; 400] = [1.0; 400];
-        let color_buffer = app_context
-            .device
-            .create_buffer_init(&BufferInitDescriptor {
-                label: Some("Circle - Color Buffer"),
-                contents: bytemuck::cast_slice(&color_slice),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-
-        let thickness_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Circle - Thickness Buffer"),
-            size: 40 * thickness_uniform_alignment,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let fade_buffer = app_context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Circle - Fade Buffer"),
-            size: 40 * fade_uniform_alignment,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let bind_group = app_context
+        let circle_bind_group = app_context
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Circle - BindGroup"),
-                layout: &bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &model_mat4_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(transform_uniform_size),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &color_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(color_uniform_size),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &thickness_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(thickness_uniform_size),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &fade_buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(fade_uniform_size),
-                        }),
-                    },
-                ],
+                layout: &circle_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &circle_uniform_buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(98),
+                    }),
+                }],
+                label: None,
             });
 
         let module = wgpu::ShaderModuleDescriptor {
@@ -338,7 +256,7 @@ impl CirclePipeline {
             // .with_wireframe(true)
             .pipeline_layout_descriptor(
                 "Circle - Vertex layout descriptor",
-                &[&bind_group_layout],
+                &[&circle_bind_group_layout],
                 &[],
             )
             .build(
@@ -351,18 +269,15 @@ impl CirclePipeline {
         Self {
             circle_info: vec![],
             render_pipeline,
+
             vertex_buffer,
-            model_mat4_buffer,
-            color_buffer,
-            thickness_buffer,
-            fade_buffer,
+            index_buffer,
 
-            transform_uniform_alignment,
-            color_uniform_alignment,
-            thickness_uniform_alignment,
-            fade_uniform_alignment,
+            circle_uniform_buffer,
 
-            circle_bind_group: bind_group,
+            circle_uniform_alignment,
+
+            circle_bind_group,
         }
     }
 }
@@ -1357,9 +1272,9 @@ impl Engine {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.2,
-                        g: 0.3,
-                        b: 0.9,
+                        r: 0.7294,
+                        g: 0.894117,
+                        b: 0.898039,
                         a: 1.0,
                     }),
                     store: wgpu::StoreOp::Store,
@@ -1591,67 +1506,46 @@ impl Engine {
             thickness,
             fade,
             color,
+            // TODO esto tiene que estar alineado porque tiene que estar alineado a `COPY_BUFFER_ALIGNMENT`
+            uniform_offset: (self.circle_pipeline.circle_info.len()
+                * self.circle_pipeline.circle_uniform_alignment as usize)
+                as _,
         });
     }
 
     pub fn update_circle_data(&mut self) {
         for (i, circle) in self.circle_pipeline.circle_info.iter_mut().enumerate() {
-            let transform_uniform_offset =
-                ((i + 1) * self.circle_pipeline.transform_uniform_alignment as usize) as u32;
-            let color_uniform_offset =
-                ((i + 1) * self.circle_pipeline.color_uniform_alignment as usize) as u32;
-            let thickness_uniform_offset =
-                ((i + 1) * self.circle_pipeline.thickness_uniform_alignment as usize) as u32;
-            let fade_uniform_offset =
-                ((i + 1) * self.circle_pipeline.fade_uniform_alignment as usize) as u32;
-
-            self.app_context.queue.write_buffer(
-                &self.circle_pipeline.color_buffer,
-                color_uniform_offset as wgpu::BufferAddress,
-                bytemuck::cast_slice(&circle.color),
-            );
-
-            self.app_context.queue.write_buffer(
-                &self.circle_pipeline.thickness_buffer,
-                thickness_uniform_offset as wgpu::BufferAddress,
-                bytemuck::cast_slice(&[circle.thickness]),
-            );
-
-            self.app_context.queue.write_buffer(
-                &self.circle_pipeline.fade_buffer,
-                fade_uniform_offset as wgpu::BufferAddress,
-                bytemuck::cast_slice(&[circle.fade]),
-            );
-
             let _view = Mat4::IDENTITY;
             let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
             let model =
                 circle.transform.position * circle.transform.rotation * circle.transform.scale;
             let new_model = proj * model;
 
+            let offset = circle.uniform_offset;
             self.app_context.queue.write_buffer(
-                &self.circle_pipeline.model_mat4_buffer,
-                transform_uniform_offset as wgpu::BufferAddress,
-                bytemuck::cast_slice(&new_model.to_cols_array_2d()),
+                &self.circle_pipeline.circle_uniform_buffer,
+                offset as wgpu::BufferAddress,
+                bytemuck::bytes_of(&CircleUniforms {
+                    model: new_model.to_cols_array_2d(),
+                    color: circle.color,
+                    thickness: circle.thickness,
+                    fade: circle.fade,
+                }),
             );
         }
     }
 
     fn render_circles<'pass>(&'pass self, render_pass: &mut RenderPass<'pass>) {
         render_pass.set_pipeline(&self.circle_pipeline.render_pipeline);
-        for (i, _circle) in self.circle_pipeline.circle_info.iter().enumerate() {
-            render_pass.set_bind_group(
-                0,
-                &self.circle_pipeline.circle_bind_group,
-                &[
-                    ((i + 1) * self.circle_pipeline.transform_uniform_alignment as usize) as u32,
-                    ((i + 1) * self.circle_pipeline.color_uniform_alignment as usize) as u32,
-                    ((i + 1) * self.circle_pipeline.thickness_uniform_alignment as usize) as u32,
-                    ((i + 1) * self.circle_pipeline.fade_uniform_alignment as usize) as u32,
-                ],
-            );
-            render_pass.set_vertex_buffer(0, self.circle_pipeline.vertex_buffer.slice(..));
-            render_pass.draw(0..6, 0..1);
+        render_pass.set_vertex_buffer(0, self.circle_pipeline.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(
+            self.circle_pipeline.index_buffer.slice(..),
+            wgpu::IndexFormat::Uint16,
+        );
+        for (i, circle) in self.circle_pipeline.circle_info.iter().enumerate() {
+            let offset = circle.uniform_offset;
+            render_pass.set_bind_group(0, &self.circle_pipeline.circle_bind_group, &[offset]);
+            render_pass.draw_indexed(0..INDICESimp.len() as u32, 0, 0..1);
         }
     }
 }
@@ -1671,7 +1565,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
     let application_window_size2 = winit::dpi::LogicalSize::new(800.0, 600.0);
     let main_window = Arc::new(
         WindowBuilder::new()
-            .with_fullscreen(Some(Fullscreen::Borderless(None)))
+            //.with_fullscreen(Some(Fullscreen::Borderless(None)))
             .with_title("Game")
             .build(&event_loop)
             .unwrap(),
@@ -1782,9 +1676,9 @@ pub async fn async_runner(mut app: impl Application + 'static) {
                 WindowEvent::RedrawRequested => {
                     clock.tick();
                     framework.prepare();
-                    app.on_update(&mut engine, clock.delta_time.as_secs_f32());
+                    app.on_update(&mut engine, clock.delta_time.as_secs_f32(), clock.total_elapsed_time.as_secs_f32());
                     println!("{:?}", clock);
-                  
+
                     app.on_render(&mut engine);
                     // IMPORTANT:
                     // I can't store a renderpass because it needs a reference to a view and the view will
