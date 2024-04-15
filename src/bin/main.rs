@@ -343,7 +343,7 @@ impl<'a> bm::Application for App<'a> {
         engine.create_texture(String::from("pumpkin"), "src/pumpkin.png");
     }
 
-    fn on_update(&mut self, engine: &mut bm::Engine, delta_time: f32) {
+    fn on_update(&mut self, engine: &mut bm::Engine, delta_time: f32, time: f32) {
         self.player.update(engine, delta_time);
         self.container.on_update(engine, &self.player, delta_time);
     }

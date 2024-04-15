@@ -76,8 +76,8 @@ struct CircleInfo {
     color: [f32; 4],
     thickness: f32,
     fade: f32,
-    uniform_offset: wgpu::DynamicOffset,
     // Radius is not needed because it is in the scale matrix. If scale is 1, then radius is 1.
+    uniform_offset: wgpu::DynamicOffset,
 }
 
 // One pipeline for each type because they have different vertex and fragment shaders.
@@ -253,7 +253,7 @@ impl CirclePipeline {
                 write_mask: wgpu::ColorWrites::ALL,
             })
             .shader(module)
-            // .with_wireframe(true)
+            //.with_wireframe(true)
             .pipeline_layout_descriptor(
                 "Circle - Vertex layout descriptor",
                 &[&circle_bind_group_layout],
@@ -267,7 +267,7 @@ impl CirclePipeline {
             );
 
         Self {
-            circle_info: vec![],
+            circle_info: Vec::with_capacity(15000),
             render_pipeline,
 
             vertex_buffer,
@@ -1419,7 +1419,6 @@ impl Engine {
 
     fn render_lines<'pass>(&'pass self, render_pass: &mut RenderPass<'pass>) {
         render_pass.set_pipeline(&self.line_pipeline.render_pipeline);
-
         for (i, _line) in self.line_pipeline.line_info.iter().enumerate() {
             render_pass.set_bind_group(
                 0,
@@ -1497,6 +1496,10 @@ impl Engine {
         fade: f32,
         color: [f32; 4],
     ) {
+        let offset =
+            (self.circle_pipeline.circle_info.len()
+                * self.circle_pipeline.circle_uniform_alignment as usize)
+                as _;
         self.circle_pipeline.circle_info.push(CircleInfo {
             transform: TransformComponent {
                 position: Mat4::from_translation(position),
@@ -1507,21 +1510,24 @@ impl Engine {
             fade,
             color,
             // TODO esto tiene que estar alineado porque tiene que estar alineado a `COPY_BUFFER_ALIGNMENT`
-            uniform_offset: (self.circle_pipeline.circle_info.len()
-                * self.circle_pipeline.circle_uniform_alignment as usize)
-                as _,
+            uniform_offset: offset
         });
     }
 
+    /*
     pub fn update_circle_data(&mut self) {
+        let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+        // FIXME: This for loop could include both `update_circle_data` (this function) and `render_circles`
         for (i, circle) in self.circle_pipeline.circle_info.iter_mut().enumerate() {
             let _view = Mat4::IDENTITY;
-            let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
+
+            // FIXME: I could do this multiplication on the GPU
             let model =
                 circle.transform.position * circle.transform.rotation * circle.transform.scale;
             let new_model = proj * model;
 
             let offset = circle.uniform_offset;
+
             self.app_context.queue.write_buffer(
                 &self.circle_pipeline.circle_uniform_buffer,
                 offset as wgpu::BufferAddress,
@@ -1532,9 +1538,14 @@ impl Engine {
                     fade: circle.fade,
                 }),
             );
+
         }
     }
+    */
 
+
+    // TODO: paralelizar el for
+    // TODO: usar indirect drawing
     fn render_circles<'pass>(&'pass self, render_pass: &mut RenderPass<'pass>) {
         render_pass.set_pipeline(&self.circle_pipeline.render_pipeline);
         render_pass.set_vertex_buffer(0, self.circle_pipeline.vertex_buffer.slice(..));
@@ -1542,8 +1553,29 @@ impl Engine {
             self.circle_pipeline.index_buffer.slice(..),
             wgpu::IndexFormat::Uint16,
         );
+
+
+        let proj = Mat4::orthographic_lh(0.0, 800.0, 0.0, 600.0, -1.0, 1.0);
         for (i, circle) in self.circle_pipeline.circle_info.iter().enumerate() {
+            let _view = Mat4::IDENTITY;
+            // FIXME: I could do this multiplication on the GPU
+            let model =
+                circle.transform.position * circle.transform.rotation * circle.transform.scale;
+            let new_model = proj * model;
+
             let offset = circle.uniform_offset;
+
+            self.app_context.queue.write_buffer(
+                &self.circle_pipeline.circle_uniform_buffer,
+                offset as wgpu::BufferAddress,
+                bytemuck::bytes_of(&CircleUniforms {
+                    model: new_model.to_cols_array_2d(),
+                    color: circle.color,
+                    thickness: circle.thickness,
+                    fade: circle.fade,
+                }),
+            );
+
             render_pass.set_bind_group(0, &self.circle_pipeline.circle_bind_group, &[offset]);
             render_pass.draw_indexed(0..INDICESimp.len() as u32, 0, 0..1);
         }
@@ -1708,7 +1740,7 @@ pub async fn async_runner(mut app: impl Application + 'static) {
 
                     engine.update_quad_data(&app_context.device);
                     engine.update_line_data(&app_context.device);
-                    engine.update_circle_data();
+                    //engine.update_circle_data();
                     let texture_map = texture_map.lock().unwrap();
                     {
                         let mut rpass = engine.begin_render(&mut encoder, &view);

@@ -1,9 +1,11 @@
+use std::sync::{Arc, Mutex};
 use bm::async_runner;
 use glam::{vec2, vec3, Vec2, Vec2Swizzles, Vec3, vec4};
 
 use rand::random;
 use rand::Rng;
 
+use rayon::prelude::*;
 /*
 - API for `render_circle` is akward
 - Can't change the clear color from the game.
@@ -89,7 +91,7 @@ impl bm::Application for App {
     fn on_setup(&mut self, engine: &mut bm::Engine) {
         let mut rng = rand::thread_rng();
 
-        for _i in 0..5000 {
+        for _i in 0..20000 {
             let x = rng.gen_range(0.0..800.0);
             let y = rng.gen_range(0.0..600.0);
             let mass = rng.gen_range(2.0..4.0);
@@ -105,7 +107,35 @@ impl bm::Application for App {
 
         let thickness = 1.00; // from 0.01 (nothing inside, almost 1px border) to 1.0 (full)
         let fade = 0.019; // 0.0001 to 2.0, 0 being no fade. 0.009 makes it look smooth enough.
-        for particle in self.particles.iter_mut() {
+
+        //for particle in self.particles.iter_mut() {
+        //    // wind
+        //    particle.add_force(vec2((0.3_f32.cos() * PIXELS_PER_METER  * 6.0 ), 0.0));
+
+        //    // gravity
+        //    particle.add_force(vec2(0.0, (-9.8_f32.sin() * PIXELS_PER_METER * 2.0 * particle.mass)));
+
+        //    particle.integrate(delta_time);
+        //    particle.check_collisions();
+
+        //    particle.clear_forces();
+
+        //    let x = 0.1 + 0.5 * (time ).cos();
+        //    let y = 0.1 + 0.5 * (time + 1.0).cos();
+        //    let z = 0.1 + 0.5 * (time + 2.0).cos();
+
+        //    engine.render_circle(
+        //        vec3(particle.pos.x, particle.pos.y, 0.0),
+        //        vec3(particle.radius, particle.radius, 0.0),
+        //        thickness,
+        //        fade,
+        //        vec4(x, y, z, 1.0).to_array(),
+        //    );
+
+        //}
+
+        let engine2 = Arc::new(Mutex::new(engine));
+        self.particles.par_iter_mut().for_each(|particle: &mut Particle| {
             // wind
             particle.add_force(vec2((0.3_f32.cos() * PIXELS_PER_METER  * 6.0 ), 0.0));
 
@@ -121,15 +151,16 @@ impl bm::Application for App {
             let y = 0.1 + 0.5 * (time + 1.0).cos();
             let z = 0.1 + 0.5 * (time + 2.0).cos();
 
-
-            engine.render_circle(
+            let mut xd = engine2.lock().unwrap();
+            xd.render_circle(
                 vec3(particle.pos.x, particle.pos.y, 0.0),
                 vec3(particle.radius, particle.radius, 0.0),
                 thickness,
                 fade,
                 vec4(x, y, z, 1.0).to_array(),
             );
-        }
+        });
+
     }
 
     fn on_render(&mut self, engine: &mut bm::Engine) {
@@ -140,6 +171,7 @@ impl bm::Application for App {
 
     fn on_event(&mut self, engine: &mut bm::Engine, event: bm::MyEvent) {}
 }
+
 pub fn main() {
     let app = App {
         particles: Vec::default(),
